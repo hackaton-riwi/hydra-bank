@@ -13,7 +13,7 @@ using System.Reflection;
 [assembly: System.Reflection.AssemblyCompanyAttribute("Hydra.Domain")]
 [assembly: System.Reflection.AssemblyConfigurationAttribute("Debug")]
 [assembly: System.Reflection.AssemblyFileVersionAttribute("1.0.0.0")]
-[assembly: System.Reflection.AssemblyInformationalVersionAttribute("1.0.0+b97b736f4838b156dcb7b14cdca121ddfcc5256a")]
+[assembly: System.Reflection.AssemblyInformationalVersionAttribute("1.0.0+262322857b43828f21a44d3f59300a90af7e3a33")]
 [assembly: System.Reflection.AssemblyProductAttribute("Hydra.Domain")]
 [assembly: System.Reflection.AssemblyTitleAttribute("Hydra.Domain")]
 [assembly: System.Reflection.AssemblyVersionAttribute("1.0.0.0")]
