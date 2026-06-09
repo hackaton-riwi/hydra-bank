@@ -1,0 +1,6 @@
+@hydra_bank_HostAddress = http://localhost:5220
+
+GET {{hydra_bank_HostAddress}}/weatherforecast/
+Accept: application/json
+
+###
