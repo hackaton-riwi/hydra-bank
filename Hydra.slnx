@@ -1,0 +1,6 @@
+<Solution>
+  <Project Path="Hydra.Api/Hydra.Api.csproj" />
+  <Project Path="Hydra.Application/Hydra.Application.csproj" />
+  <Project Path="Hydra.Domain/Hydra.Domain.csproj" />
+  <Project Path="Hydra.Infrastructure/Hydra.Infrastructure.csproj" />
+</Solution>
