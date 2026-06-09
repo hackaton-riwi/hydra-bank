@@ -6,8 +6,17 @@
 /home/duvan/Documents/carpeta proyecto-hackaton/hydra-bank/Hydra.Api/bin/Debug/net10.0/Hydra.Api.runtimeconfig.json
 /home/duvan/Documents/carpeta proyecto-hackaton/hydra-bank/Hydra.Api/bin/Debug/net10.0/Hydra.Api.dll
 /home/duvan/Documents/carpeta proyecto-hackaton/hydra-bank/Hydra.Api/bin/Debug/net10.0/Hydra.Api.pdb
+/home/duvan/Documents/carpeta proyecto-hackaton/hydra-bank/Hydra.Api/bin/Debug/net10.0/Microsoft.AspNetCore.Identity.EntityFrameworkCore.dll
 /home/duvan/Documents/carpeta proyecto-hackaton/hydra-bank/Hydra.Api/bin/Debug/net10.0/Microsoft.AspNetCore.OpenApi.dll
+/home/duvan/Documents/carpeta proyecto-hackaton/hydra-bank/Hydra.Api/bin/Debug/net10.0/Microsoft.EntityFrameworkCore.dll
+/home/duvan/Documents/carpeta proyecto-hackaton/hydra-bank/Hydra.Api/bin/Debug/net10.0/Microsoft.EntityFrameworkCore.Abstractions.dll
+/home/duvan/Documents/carpeta proyecto-hackaton/hydra-bank/Hydra.Api/bin/Debug/net10.0/Microsoft.EntityFrameworkCore.Relational.dll
 /home/duvan/Documents/carpeta proyecto-hackaton/hydra-bank/Hydra.Api/bin/Debug/net10.0/Microsoft.OpenApi.dll
+/home/duvan/Documents/carpeta proyecto-hackaton/hydra-bank/Hydra.Api/bin/Debug/net10.0/Npgsql.dll
+/home/duvan/Documents/carpeta proyecto-hackaton/hydra-bank/Hydra.Api/bin/Debug/net10.0/Npgsql.EntityFrameworkCore.PostgreSQL.dll
+/home/duvan/Documents/carpeta proyecto-hackaton/hydra-bank/Hydra.Api/bin/Debug/net10.0/Swashbuckle.AspNetCore.Swagger.dll
+/home/duvan/Documents/carpeta proyecto-hackaton/hydra-bank/Hydra.Api/bin/Debug/net10.0/Swashbuckle.AspNetCore.SwaggerGen.dll
+/home/duvan/Documents/carpeta proyecto-hackaton/hydra-bank/Hydra.Api/bin/Debug/net10.0/Swashbuckle.AspNetCore.SwaggerUI.dll
 /home/duvan/Documents/carpeta proyecto-hackaton/hydra-bank/Hydra.Api/bin/Debug/net10.0/Hydra.Application.dll
 /home/duvan/Documents/carpeta proyecto-hackaton/hydra-bank/Hydra.Api/bin/Debug/net10.0/Hydra.Domain.dll
 /home/duvan/Documents/carpeta proyecto-hackaton/hydra-bank/Hydra.Api/bin/Debug/net10.0/Hydra.Infrastructure.dll
