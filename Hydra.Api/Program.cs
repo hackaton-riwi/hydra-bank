@@ -1,10 +1,13 @@
+using Hydra.Application.Interfaces;
+using Hydra.Application.Services;
+using Hydra.Infrastructure;
 using Microsoft.AspNetCore.Authentication.JwtBearer;
 using Microsoft.AspNetCore.Identity;
 using Microsoft.IdentityModel.Tokens;
 using Microsoft.OpenApi;
+using StackExchange.Redis;
 using System.Security.Claims;
 using System.Text;
-using Hydra.Infrastructure;
 
 var builder = WebApplication.CreateBuilder(args);
 
@@ -64,6 +67,13 @@ builder.Services.AddAuthentication(options =>
     });
 builder.Services.AddAuthorization();
 builder.Services.AddInfrastructure(builder.Configuration);
+
+builder.Services.AddSingleton<IConnectionMultiplexer>(_ =>
+    ConnectionMultiplexer.Connect(
+        builder.Configuration.GetSection("Redis")["Configuration"] ?? "localhost:6379"));
+
+builder.Services.AddScoped<IIdempotencyService, IdempotencyService>();
+builder.Services.AddScoped<ITransactionService, TransactionService>();
 
 var app = builder.Build();
 

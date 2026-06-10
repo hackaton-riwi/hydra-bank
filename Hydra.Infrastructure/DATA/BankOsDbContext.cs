@@ -35,7 +35,7 @@ public partial class BankOsDbContext : IdentityDbContext
         modelBuilder
             .HasPostgresEnum("account_status", new[] { "ACTIVE", "INACTIVE", "BLOCKED" })
             .HasPostgresEnum("fee_type_enum", new[] { "FIXED", "PERCENTAGE" })
-            .HasPostgresEnum("idempotency_state", new[] { "PROCESSING", "COMPLETED" })
+            .HasPostgresEnum("idempotency_state", new[] { "PROCESSING", "COMPLETED", "FAILED" })
             .HasPostgresEnum("transaction_status", new[] { "PENDING", "SUCCESS", "FAILED" })
             .HasPostgresEnum("transaction_type", new[] { "DEPOSIT", "WITHDRAW", "TRANSFER" })
             .HasPostgresEnum("user_role", new[] { "ADMIN", "CLIENT" });
