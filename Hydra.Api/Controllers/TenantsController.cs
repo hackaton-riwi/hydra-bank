@@ -19,7 +19,7 @@ public class TenantsController : ControllerBase
 {
     private static readonly Regex SlugRegex = new("^[a-z0-9]+(?:-[a-z0-9]+)*$", RegexOptions.Compiled);
     private static readonly Regex InvalidSlugCharactersRegex = new("[^a-z0-9]+", RegexOptions.Compiled);
-    private const string DefaultMainCurrency = "USD";
+    private const string DefaultMainCurrency = "COP";
     private const decimal DefaultMaxTransactionAmount = 5_000_000m;
     private const decimal DefaultFeeValue = 0m;
     private const string TenantAdminRole = "ADMIN";
@@ -107,6 +107,7 @@ public class TenantsController : ControllerBase
             Id = Guid.NewGuid(),
             TenantId = tenant.Id,
             FullName = $"Administrador {tenantName}",
+            DocumentNumber = $"ADMIN-{tenant.Id:N}",
             Email = adminEmail,
             Role = UserRole.ADMIN,
             CreatedAt = now,

@@ -4,6 +4,7 @@ using Hydra.Domain.Enums;
 using Hydra.Infrastructure.DATA;
 using Microsoft.EntityFrameworkCore;
 using Microsoft.EntityFrameworkCore.Infrastructure;
+using Microsoft.EntityFrameworkCore.Migrations;
 using Microsoft.EntityFrameworkCore.Storage.ValueConversion;
 using Npgsql.EntityFrameworkCore.PostgreSQL.Metadata;
 
@@ -12,9 +13,11 @@ using Npgsql.EntityFrameworkCore.PostgreSQL.Metadata;
 namespace Hydra.Infrastructure.Migrations
 {
     [DbContext(typeof(BankOsDbContext))]
-    partial class BankOsDbContextModelSnapshot : ModelSnapshot
+    [Migration("20260610174155_AccountDocumentAndRecharge")]
+    partial class AccountDocumentAndRecharge
     {
-        protected override void BuildModel(ModelBuilder modelBuilder)
+        /// <inheritdoc />
+        protected override void BuildTargetModel(ModelBuilder modelBuilder)
         {
 #pragma warning disable 612, 618
             modelBuilder
@@ -146,6 +149,57 @@ namespace Hydra.Infrastructure.Migrations
                     b.ToTable("audit_logs", (string)null);
                 });
 
+            modelBuilder.Entity("Hydra.Domain.Entities.ExchangeRate", b =>
+                {
+                    b.Property<Guid>("Id")
+                        .HasColumnType("uuid")
+                        .HasColumnName("id");
+
+                    b.Property<DateTime>("CreatedAt")
+                        .ValueGeneratedOnAdd()
+                        .HasColumnType("timestamp with time zone")
+                        .HasColumnName("created_at")
+                        .HasDefaultValueSql("now()");
+
+                    b.Property<string>("FromCurrency")
+                        .IsRequired()
+                        .HasMaxLength(3)
+                        .HasColumnType("character varying(3)")
+                        .HasColumnName("from_currency");
+
+                    b.Property<decimal>("Rate")
+                        .HasPrecision(18, 8)
+                        .HasColumnType("numeric(18,8)")
+                        .HasColumnName("rate");
+
+                    b.Property<Guid>("TenantId")
+                        .HasColumnType("uuid")
+                        .HasColumnName("tenant_id");
+
+                    b.Property<string>("ToCurrency")
+                        .IsRequired()
+                        .HasMaxLength(3)
+                        .HasColumnType("character varying(3)")
+                        .HasColumnName("to_currency");
+
+                    b.HasKey("Id")
+                        .HasName("exchange_rates_pkey");
+
+                    b.HasIndex(new[] { "TenantId", "FromCurrency", "ToCurrency" }, "idx_exchange_rates_tenant_pair")
+                        .IsUnique();
+
+                    b.ToTable("exchange_rates", null, t =>
+                        {
+                            t.HasCheckConstraint("chk_er_from", "from_currency ~ '^[A-Z]{3}$'");
+
+                            t.HasCheckConstraint("chk_er_to", "to_currency ~ '^[A-Z]{3}$'");
+
+                            t.HasCheckConstraint("chk_exchange_different_currency", "from_currency <> to_currency");
+
+                            t.HasCheckConstraint("chk_exchange_rate_positive", "rate > 0");
+                        });
+                });
+
             modelBuilder.Entity("Hydra.Domain.Entities.Tenant", b =>
                 {
                     b.Property<Guid>("Id")
@@ -224,6 +278,11 @@ namespace Hydra.Infrastructure.Migrations
                         .HasColumnType("uuid")
                         .HasColumnName("id");
 
+                    b.Property<decimal?>("ConvertedAmount")
+                        .HasPrecision(18, 2)
+                        .HasColumnType("numeric(18,2)")
+                        .HasColumnName("converted_amount");
+
                     b.Property<Guid>("CorrelationId")
                         .HasColumnType("uuid")
                         .HasColumnName("correlation_id");
@@ -237,6 +296,11 @@ namespace Hydra.Infrastructure.Migrations
                     b.Property<Guid?>("DestinationAccountId")
                         .HasColumnType("uuid")
                         .HasColumnName("destination_account_id");
+
+                    b.Property<decimal?>("ExchangeRate")
+                        .HasPrecision(18, 8)
+                        .HasColumnType("numeric(18,8)")
+                        .HasColumnName("exchange_rate");
 
                     b.Property<decimal?>("FeeAmount")
                         .ValueGeneratedOnAdd()
@@ -299,6 +363,8 @@ namespace Hydra.Infrastructure.Migrations
 
                     b.ToTable("transactions", null, t =>
                         {
+                            t.HasCheckConstraint("chk_trans_converted_amount_positive", "converted_amount IS NULL OR converted_amount > 0");
+
                             t.HasCheckConstraint("chk_trans_fee_positive", "fee_amount >= 0");
 
                             t.HasCheckConstraint("chk_trans_original_amount_positive", "original_amount > 0");
@@ -590,6 +656,18 @@ namespace Hydra.Infrastructure.Migrations
                     b.Navigation("User");
                 });
 
+            modelBuilder.Entity("Hydra.Domain.Entities.ExchangeRate", b =>
+                {
+                    b.HasOne("Hydra.Domain.Entities.Tenant", "Tenant")
+                        .WithMany("ExchangeRates")
+                        .HasForeignKey("TenantId")
+                        .OnDelete(DeleteBehavior.Restrict)
+                        .IsRequired()
+                        .HasConstraintName("exchange_rates_tenant_id_fkey");
+
+                    b.Navigation("Tenant");
+                });
+
             modelBuilder.Entity("Hydra.Domain.Entities.Transaction", b =>
                 {
                     b.HasOne("Hydra.Domain.Entities.Account", "Account")
@@ -693,6 +771,8 @@ namespace Hydra.Infrastructure.Migrations
 
             modelBuilder.Entity("Hydra.Domain.Entities.Tenant", b =>
                 {
+                    b.Navigation("ExchangeRates");
+
                     b.Navigation("Users");
                 });
 

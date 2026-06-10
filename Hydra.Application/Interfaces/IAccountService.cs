@@ -8,11 +8,7 @@ public interface IAccountService
 
     Task<object> DeactivateAsync(Guid accountId);
 
-    Task<ServiceResponse> DepositAsync(Guid accountId, MoneyOperationDto request, Guid idempotencyKey);
-
-    Task<ServiceResponse> WithdrawAsync(Guid accountId, MoneyOperationDto request, Guid idempotencyKey);
-
-    Task<ServiceResponse> TransferAsync(TransferDto request, Guid idempotencyKey);
+    Task<object> RechargeAsync(RechargeAccountDto request);
 
     Task<object> GetTransactionsAsync(TransactionHistoryQueryDto query);
 }

@@ -51,54 +51,23 @@ public class AccountsController : ControllerBase
         }
     }
 
-    [HttpPost("{accountId:guid}/deposit")]
-    public async Task<IActionResult> Deposit(Guid accountId, [FromBody] MoneyOperationDto request)
+    [HttpPost("recharge")]
+    public async Task<IActionResult> Recharge([FromBody] RechargeAccountDto request)
     {
-        if (!TryGetIdempotencyKey(out var idempotencyKey, out var error))
-            return BadRequest(error);
-
-        var response = await _accountService.DepositAsync(accountId, request, idempotencyKey);
-        return StatusCode(response.StatusCode, response.Body);
-    }
-
-    [HttpPost("{accountId:guid}/withdraw")]
-    public async Task<IActionResult> Withdraw(Guid accountId, [FromBody] MoneyOperationDto request)
-    {
-        if (!TryGetIdempotencyKey(out var idempotencyKey, out var error))
-            return BadRequest(error);
-
-        var response = await _accountService.WithdrawAsync(accountId, request, idempotencyKey);
-        return StatusCode(response.StatusCode, response.Body);
-    }
-
-    [HttpPost("transfer")]
-    public async Task<IActionResult> Transfer([FromBody] TransferDto request)
-    {
-        if (!TryGetIdempotencyKey(out var idempotencyKey, out var error))
-            return BadRequest(error);
-
-        var response = await _accountService.TransferAsync(request, idempotencyKey);
-        return StatusCode(response.StatusCode, response.Body);
+        try
+        {
+            return Ok(await _accountService.RechargeAsync(request));
+        }
+        catch (Exception exception)
+        {
+            return BadRequest(Error("ACCOUNT_RECHARGE_FAILED", exception.Message));
+        }
     }
 
     [HttpGet("transactions")]
     public async Task<IActionResult> Transactions([FromQuery] TransactionHistoryQueryDto query)
     {
         return Ok(await _accountService.GetTransactionsAsync(query));
-    }
-
-    private bool TryGetIdempotencyKey(out Guid idempotencyKey, out object? error)
-    {
-        idempotencyKey = Guid.Empty;
-        error = null;
-
-        if (!Guid.TryParse(Request.Headers["Idempotency-Key"].FirstOrDefault(), out idempotencyKey))
-        {
-            error = Error("IDEMPOTENCY_KEY_REQUIRED", "El header Idempotency-Key es obligatorio y debe ser un UUID");
-            return false;
-        }
-
-        return true;
     }
 
     private static object Error(string code, string description)

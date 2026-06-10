@@ -17,6 +17,7 @@ Content-Type: application/json
 {
   "tenantSlug": "manhattan-trust",
   "fullName": "Cliente Uno",
+  "documentNumber": "123456789",
   "email": "cliente@manhattan.test",
   "password": "Client123"
 }
@@ -37,3 +38,13 @@ Content-Type: application/json
 GET {{Hydra.Api_HostAddress}}/api/v1/auth/me
 Accept: application/json
 Authorization: Bearer {{token}}
+
+###
+
+POST {{Hydra.Api_HostAddress}}/api/v1/accounts/recharge
+Content-Type: application/json
+Authorization: Bearer {{token}}
+
+{
+  "amount": 50000
+}

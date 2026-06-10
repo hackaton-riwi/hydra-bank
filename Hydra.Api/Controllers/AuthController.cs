@@ -22,6 +22,7 @@ public class AuthController : ControllerBase
     private const string SuperAdminRole = "SUPERADMIN";
     private const string AdminRole = "ADMIN";
     private const string ClientRole = "CLIENT";
+    private const string DefaultCurrency = "COP";
 
     private readonly UserManager<IdentityUser> _userManager;
     private readonly RoleManager<IdentityRole> _roleManager;
@@ -49,6 +50,12 @@ public class AuthController : ControllerBase
     {
         var email = request.Email.Trim().ToLowerInvariant();
         var tenantSlug = request.TenantSlug.Trim().ToLowerInvariant();
+        var documentNumber = NormalizeDocumentNumber(request.DocumentNumber);
+
+        if (string.IsNullOrWhiteSpace(documentNumber))
+        {
+            return BadRequest(Error("DOCUMENT_REQUIRED", "El número de documento es obligatorio"));
+        }
 
         var tenant = await _dbContext.Tenants
             .SingleOrDefaultAsync(x => x.Slug == tenantSlug);
@@ -62,6 +69,11 @@ public class AuthController : ControllerBase
             await _dbContext.BankUsers.AnyAsync(x => x.TenantId == tenant.Id && x.Email.ToLower() == email))
         {
             return Conflict(Error("EMAIL_ALREADY_EXISTS", "Ya existe un usuario con ese correo"));
+        }
+
+        if (await _dbContext.BankUsers.AnyAsync(x => x.TenantId == tenant.Id && x.DocumentNumber == documentNumber))
+        {
+            return Conflict(Error("DOCUMENT_ALREADY_EXISTS", "Ya existe un usuario con ese número de documento"));
         }
 
         await EnsureDefaultRolesExist();
@@ -79,6 +91,7 @@ public class AuthController : ControllerBase
             Id = Guid.NewGuid(),
             TenantId = tenant.Id,
             FullName = request.FullName.Trim(),
+            DocumentNumber = documentNumber,
             Email = email,
             Role = UserRole.CLIENT,
             CreatedAt = now,
@@ -86,9 +99,23 @@ public class AuthController : ControllerBase
         };
         bankUser.PasswordHash = _passwordHasher.HashPassword(bankUser, request.Password);
 
+        var account = new Hydra.Domain.Entities.Account
+        {
+            Id = Guid.NewGuid(),
+            TenantId = tenant.Id,
+            OwnerId = bankUser.Id,
+            AccountNumber = GenerateAccountNumber(),
+            Balance = 0,
+            Currency = DefaultCurrency,
+            Status = AccountStatus.ACTIVE,
+            CreatedAt = now,
+            UpdatedAt = now
+        };
+
         await using var transaction = await _dbContext.Database.BeginTransactionAsync();
 
         _dbContext.BankUsers.Add(bankUser);
+        _dbContext.Accounts.Add(account);
         await _dbContext.SaveChangesAsync();
 
         var identityResult = await _userManager.CreateAsync(identityUser, request.Password);
@@ -110,11 +137,7 @@ public class AuthController : ControllerBase
 
         await transaction.CommitAsync();
 
-        var roles = await _userManager.GetRolesAsync(identityUser);
-        var expiresAt = DateTime.UtcNow.AddMinutes(GetTokenExpirationMinutes());
-        var token = GenerateJwtToken(identityUser, roles, bankUser, expiresAt);
-
-        return Created("/api/v1/auth/register", BuildAuthResponse(token, expiresAt, identityUser, roles, bankUser));
+        return Created("/api/v1/auth/register", BuildRegistrationResponse(identityUser, bankUser, account));
     }
 
     [HttpPost("login")]
@@ -154,8 +177,11 @@ public class AuthController : ControllerBase
         var roles = await _userManager.GetRolesAsync(user);
         var expiresAt = DateTime.UtcNow.AddMinutes(GetTokenExpirationMinutes());
         var token = GenerateJwtToken(user, roles, bankUser, expiresAt);
+        var account = await _dbContext.Accounts
+            .AsNoTracking()
+            .SingleOrDefaultAsync(x => x.TenantId == bankUser.TenantId && x.OwnerId == bankUser.Id);
 
-        return Ok(BuildAuthResponse(token, expiresAt, user, roles, bankUser));
+        return Ok(BuildAuthResponse(token, expiresAt, user, roles, bankUser, account));
     }
 
     [HttpGet("me")]
@@ -184,10 +210,16 @@ public class AuthController : ControllerBase
 
         var roles = await _userManager.GetRolesAsync(user);
         var bankUser = await FindBankUserAsync(user);
+        var account = bankUser is null
+            ? null
+            : await _dbContext.Accounts
+                .AsNoTracking()
+                .SingleOrDefaultAsync(x => x.TenantId == bankUser.TenantId && x.OwnerId == bankUser.Id);
 
         return Ok(new
         {
-            user = BuildUserResponse(user, roles, bankUser)
+            user = BuildUserResponse(user, roles, bankUser),
+            account = account is null ? null : BuildAccountResponse(account)
         });
     }
 
@@ -263,13 +295,39 @@ public class AuthController : ControllerBase
         DateTime expiresAt,
         IdentityUser user,
         IEnumerable<string> roles,
-        Hydra.Domain.Entities.User? bankUser)
+        Hydra.Domain.Entities.User? bankUser,
+        Hydra.Domain.Entities.Account? account = null)
     {
         return new
         {
             token,
             expiresAt,
-            user = BuildUserResponse(user, roles, bankUser)
+            user = BuildUserResponse(user, roles, bankUser),
+            account = account is null ? null : BuildAccountResponse(account)
+        };
+    }
+
+    private static object BuildRegistrationResponse(
+        IdentityUser user,
+        Hydra.Domain.Entities.User bankUser,
+        Hydra.Domain.Entities.Account account)
+    {
+        return new
+        {
+            success = true,
+            code = "CLIENT_REGISTERED",
+            description = "Cliente registrado correctamente. Debe iniciar sesión para obtener token.",
+            user = new
+            {
+                identityUserId = user.Id,
+                userId = bankUser.Id,
+                bankUser.TenantId,
+                bankUser.FullName,
+                bankUser.DocumentNumber,
+                bankUser.Email,
+                tenantRole = bankUser.Role.ToString()
+            },
+            account = BuildAccountResponse(account)
         };
     }
 
@@ -283,9 +341,25 @@ public class AuthController : ControllerBase
             identityUserId = user.Id,
             userId = bankUser?.Id.ToString() ?? user.Id,
             tenantId = bankUser?.TenantId,
+            fullName = bankUser?.FullName,
+            documentNumber = bankUser?.DocumentNumber,
             email = user.Email,
             roles = roles.ToArray(),
             tenantRole = bankUser?.Role.ToString()
+        };
+    }
+
+    private static object BuildAccountResponse(Hydra.Domain.Entities.Account account)
+    {
+        return new
+        {
+            account.Id,
+            account.AccountNumber,
+            account.OwnerId,
+            account.Balance,
+            account.Currency,
+            Status = account.Status.ToString(),
+            account.CreatedAt
         };
     }
 
@@ -301,6 +375,18 @@ public class AuthController : ControllerBase
         return await _dbContext.BankUsers
             .AsNoTracking()
             .SingleOrDefaultAsync(bankUser => bankUser.Email.ToLower() == email);
+    }
+
+    private static string NormalizeDocumentNumber(string documentNumber)
+    {
+        var normalized = documentNumber.Trim().ToUpperInvariant();
+
+        return normalized;
+    }
+
+    private static string GenerateAccountNumber()
+    {
+        return DateTime.UtcNow.Ticks.ToString()[^10..];
     }
 
     private static object Error(string code, string description)

@@ -26,7 +26,5 @@ public partial class Tenant
 
     public DateTime UpdatedAt { get; set; }
 
-    public virtual ICollection<ExchangeRate> ExchangeRates { get; set; } = new List<ExchangeRate>();
-
     public virtual ICollection<User> Users { get; set; } = new List<User>();
 }
