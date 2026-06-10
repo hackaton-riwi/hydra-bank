@@ -1,14 +1,19 @@
 using Hydra.Application.Interfaces;
 using Hydra.Application.Services;
+using Hydra.Domain.Entities;
+using Hydra.Domain.Enums;
 using Hydra.Infrastructure;
+using Hydra.Infrastructure.DATA;
 using Microsoft.AspNetCore.Authentication.JwtBearer;
 using Microsoft.AspNetCore.Identity;
 using Microsoft.AspNetCore.RateLimiting;
+using Microsoft.EntityFrameworkCore;
 using Microsoft.IdentityModel.Tokens;
 using Microsoft.OpenApi;
 using StackExchange.Redis;
 using System.Security.Claims;
 using System.Text;
+using BankUser = Hydra.Domain.Entities.User;
 using System.Threading.RateLimiting;
 
 var builder = WebApplication.CreateBuilder(args);
@@ -125,6 +130,7 @@ builder.Services.AddScoped<ITransactionService, TransactionService>();
 var app = builder.Build();
 
 await SeedIdentityRolesAsync(app);
+await SeedSuperAdminAsync(app);
 
 if (app.Environment.IsDevelopment())
 {
@@ -152,6 +158,118 @@ static async Task SeedIdentityRolesAsync(WebApplication app)
         if (!await roleManager.RoleExistsAsync(roleName))
         {
             await roleManager.CreateAsync(new IdentityRole(roleName));
+        }
+    }
+}
+
+static async Task SeedSuperAdminAsync(WebApplication app)
+{
+    const string tenantName = "Hydra Bank";
+    const string tenantSlug = "hydra-bank";
+    const string email = "admin@hydra.test";
+    const string password = "hydra123*";
+    const string superAdminRole = "SUPERADMIN";
+
+    using var scope = app.Services.CreateScope();
+    var dbContext = scope.ServiceProvider.GetRequiredService<BankOsDbContext>();
+    var userManager = scope.ServiceProvider.GetRequiredService<UserManager<IdentityUser>>();
+    var roleManager = scope.ServiceProvider.GetRequiredService<RoleManager<IdentityRole>>();
+    var bankPasswordHasher = scope.ServiceProvider.GetRequiredService<IPasswordHasher<BankUser>>();
+
+    if (!await roleManager.RoleExistsAsync(superAdminRole))
+    {
+        await roleManager.CreateAsync(new IdentityRole(superAdminRole));
+    }
+
+    var now = DateTime.UtcNow;
+    var tenant = await dbContext.Tenants.SingleOrDefaultAsync(x => x.Slug == tenantSlug);
+
+    if (tenant is null)
+    {
+        tenant = new Tenant
+        {
+            Id = Guid.NewGuid(),
+            Name = tenantName,
+            Slug = tenantSlug,
+            MainCurrency = "COP",
+            MaxTransactionAmount = 5_000_000m,
+            FeeType = FeeTypeEnum.FIXED,
+            FeeValue = 0m,
+            WebhookUrl = null,
+            CreatedAt = now,
+            UpdatedAt = now
+        };
+
+        dbContext.Tenants.Add(tenant);
+        await dbContext.SaveChangesAsync();
+    }
+
+    var bankUser = await dbContext.BankUsers.SingleOrDefaultAsync(x =>
+        x.TenantId == tenant.Id &&
+        x.Email.ToLower() == email);
+
+    if (bankUser is null)
+    {
+        bankUser = new BankUser
+        {
+            Id = Guid.NewGuid(),
+            TenantId = tenant.Id,
+            FullName = "Super Administrador Hydra",
+            DocumentNumber = "SUPERADMIN-HYDRA-BANK",
+            Email = email,
+            Role = UserRole.ADMIN,
+            CreatedAt = now,
+            UpdatedAt = now
+        };
+
+        dbContext.BankUsers.Add(bankUser);
+    }
+
+    bankUser.PasswordHash = bankPasswordHasher.HashPassword(bankUser, password);
+    bankUser.UpdatedAt = now;
+    await dbContext.SaveChangesAsync();
+
+    var identityUserName = $"{tenantSlug}:{email}";
+    var identityUser = await userManager.FindByNameAsync(identityUserName);
+
+    if (identityUser is null)
+    {
+        identityUser = new IdentityUser
+        {
+            UserName = identityUserName,
+            Email = email,
+            EmailConfirmed = true
+        };
+
+        var createResult = await userManager.CreateAsync(identityUser);
+
+        if (!createResult.Succeeded)
+        {
+            throw new InvalidOperationException(
+                $"No se pudo crear el superadmin: {string.Join(", ", createResult.Errors.Select(x => x.Description))}");
+        }
+
+        identityUser.PasswordHash = userManager.PasswordHasher.HashPassword(identityUser, password);
+        await userManager.UpdateAsync(identityUser);
+        await userManager.UpdateSecurityStampAsync(identityUser);
+    }
+    else
+    {
+        identityUser.Email = email;
+        identityUser.EmailConfirmed = true;
+        identityUser.PasswordHash = userManager.PasswordHasher.HashPassword(identityUser, password);
+        await userManager.UpdateAsync(identityUser);
+        await userManager.UpdateSecurityStampAsync(identityUser);
+    }
+
+    if (!await userManager.IsInRoleAsync(identityUser, superAdminRole))
+    {
+        var roleResult = await userManager.AddToRoleAsync(identityUser, superAdminRole);
+
+        if (!roleResult.Succeeded)
+        {
+            throw new InvalidOperationException(
+                $"No se pudo asignar SUPERADMIN: {string.Join(", ", roleResult.Errors.Select(x => x.Description))}");
         }
     }
 }
