@@ -1,39 +1,55 @@
 @Hydra.Api_HostAddress = http://localhost:5088
 @token = pega_aqui_el_token
-@userId = pega_aqui_el_user_id
 
-POST {{Hydra.Api_HostAddress}}/api/auth/register
+GET {{Hydra.Api_HostAddress}}/api/v1/tenants
+Accept: application/json
+
+###
+
+POST {{Hydra.Api_HostAddress}}/api/v1/tenants
 Content-Type: application/json
 
 {
-  "email": "admin@hydra.local",
-  "password": "Password1"
+  "nombreTenant": "Manhattan Trust Bank",
+  "correo": "admin@manhattan.test"
 }
 
 ###
 
-POST {{Hydra.Api_HostAddress}}/api/auth/login
+POST {{Hydra.Api_HostAddress}}/api/v1/auth/register
 Content-Type: application/json
 
 {
-  "email": "admin@hydra.local",
-  "password": "Password1"
+  "tenantSlug": "manhattan-trust",
+  "fullName": "Cliente Uno",
+  "documentNumber": "123456789",
+  "email": "cliente@manhattan.test",
+  "password": "Client123"
 }
 
 ###
 
-GET {{Hydra.Api_HostAddress}}/api/auth/me
+POST {{Hydra.Api_HostAddress}}/api/v1/auth/login
+Content-Type: application/json
+
+{
+  "tenantSlug": "manhattan-trust",
+  "email": "cliente@manhattan.test",
+  "password": "Client123"
+}
+
+###
+
+GET {{Hydra.Api_HostAddress}}/api/v1/auth/me
 Accept: application/json
 Authorization: Bearer {{token}}
 
 ###
 
-POST {{Hydra.Api_HostAddress}}/api/auth/users/{{userId}}/roles
+POST {{Hydra.Api_HostAddress}}/api/v1/accounts/recharge
 Content-Type: application/json
 Authorization: Bearer {{token}}
 
 {
-  "role": "CLIENT"
+  "amount": 50000
 }
-
-###

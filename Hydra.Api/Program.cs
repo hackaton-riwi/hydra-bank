@@ -1,10 +1,15 @@
+using Hydra.Application.Interfaces;
+using Hydra.Application.Services;
+using Hydra.Infrastructure;
 using Microsoft.AspNetCore.Authentication.JwtBearer;
 using Microsoft.AspNetCore.Identity;
+using Microsoft.AspNetCore.RateLimiting;
 using Microsoft.IdentityModel.Tokens;
 using Microsoft.OpenApi;
+using StackExchange.Redis;
 using System.Security.Claims;
 using System.Text;
-using Hydra.Infrastructure;
+using System.Threading.RateLimiting;
 
 var builder = WebApplication.CreateBuilder(args);
 
@@ -39,6 +44,23 @@ if (Encoding.UTF8.GetByteCount(jwtKey) < 32)
 {
     throw new InvalidOperationException("Jwt:Key debe tener mínimo 32 caracteres para HmacSha256");
 }
+builder.Services.AddHttpContextAccessor();
+
+builder.Services.AddScoped<IAccountService, AccountService>();
+
+var redisConnectionString = builder.Configuration.GetConnectionString("Redis");
+if (!string.IsNullOrWhiteSpace(redisConnectionString))
+{
+    builder.Services.AddStackExchangeRedisCache(options =>
+    {
+        options.Configuration = redisConnectionString;
+        options.InstanceName = "HydraBank:";
+    });
+}
+else
+{
+    builder.Services.AddDistributedMemoryCache();
+}
 
 builder.Services.AddAuthentication(options =>
     {
@@ -63,7 +85,42 @@ builder.Services.AddAuthentication(options =>
         };
     });
 builder.Services.AddAuthorization();
+builder.Services.AddRateLimiter(options =>
+{
+    options.RejectionStatusCode = StatusCodes.Status429TooManyRequests;
+
+    options.AddPolicy("auth", httpContext =>
+    {
+        var partitionKey = GetRateLimitPartitionKey(httpContext);
+
+        return RateLimitPartition.GetFixedWindowLimiter(partitionKey, _ => new FixedWindowRateLimiterOptions
+        {
+            PermitLimit = 5,
+            Window = TimeSpan.FromMinutes(1),
+            QueueLimit = 0
+        });
+    });
+
+    options.AddPolicy("financial", httpContext =>
+    {
+        var partitionKey = GetRateLimitPartitionKey(httpContext);
+
+        return RateLimitPartition.GetFixedWindowLimiter(partitionKey, _ => new FixedWindowRateLimiterOptions
+        {
+            PermitLimit = 30,
+            Window = TimeSpan.FromMinutes(1),
+            QueueLimit = 0
+        });
+    });
+});
 builder.Services.AddInfrastructure(builder.Configuration);
+
+builder.Services.AddSingleton<IConnectionMultiplexer>(_ =>
+    ConnectionMultiplexer.Connect(
+        builder.Configuration.GetSection("Redis")["Configuration"] ?? "localhost:6379"));
+
+builder.Services.AddScoped<IIdempotencyService, IdempotencyService>();
+builder.Services.AddScoped<ITransactionService, TransactionService>();
 
 var app = builder.Build();
 
@@ -77,6 +134,7 @@ if (app.Environment.IsDevelopment())
 
 app.UseHttpsRedirection();
 
+app.UseRateLimiter();
 app.UseAuthentication();
 app.UseAuthorization();
 
@@ -89,11 +147,23 @@ static async Task SeedIdentityRolesAsync(WebApplication app)
     using var scope = app.Services.CreateScope();
     var roleManager = scope.ServiceProvider.GetRequiredService<RoleManager<IdentityRole>>();
 
-    foreach (var roleName in new[] { "ADMIN", "CLIENT" })
+    foreach (var roleName in new[] { "SUPERADMIN", "ADMIN", "CLIENT" })
     {
         if (!await roleManager.RoleExistsAsync(roleName))
         {
             await roleManager.CreateAsync(new IdentityRole(roleName));
         }
     }
+}
+
+static string GetRateLimitPartitionKey(HttpContext httpContext)
+{
+    var userId = httpContext.User.FindFirstValue(ClaimTypes.NameIdentifier);
+
+    if (!string.IsNullOrWhiteSpace(userId))
+    {
+        return $"user:{userId}";
+    }
+
+    return $"ip:{httpContext.Connection.RemoteIpAddress?.ToString() ?? "unknown"}";
 }

@@ -1,0 +1,12 @@
+.git
+.idea
+.vs
+
+**/bin
+**/obj
+
+**/.env
+**/.env.*
+
+Hydra.Infrastructure/DOC
+Hydra.Api/appsettings.json.bak

@@ -20,15 +20,9 @@ public partial class Transaction
 
     public decimal OriginalAmount { get; set; }
 
-    public decimal? ConvertedAmount { get; set; }
-
-    public decimal? ExchangeRate { get; set; }
-
     public decimal? FeeAmount { get; set; }
 
     public TransactionStatus Status { get; set; }
-
-    public Guid IdempotencyKey { get; set; }
 
     public Guid CorrelationId { get; set; }
 

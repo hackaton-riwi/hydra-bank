@@ -18,10 +18,6 @@ public partial class BankOsDbContext : IdentityDbContext
 
     public virtual DbSet<AuditLog> AuditLogs { get; set; }
 
-    public virtual DbSet<ExchangeRate> ExchangeRates { get; set; }
-
-    public virtual DbSet<IdempotencyRecord> IdempotencyRecords { get; set; }
-
     public virtual DbSet<Tenant> Tenants { get; set; }
 
     public virtual DbSet<Transaction> Transactions { get; set; }
@@ -35,7 +31,6 @@ public partial class BankOsDbContext : IdentityDbContext
         modelBuilder
             .HasPostgresEnum("account_status", new[] { "ACTIVE", "INACTIVE", "BLOCKED" })
             .HasPostgresEnum("fee_type_enum", new[] { "FIXED", "PERCENTAGE" })
-            .HasPostgresEnum("idempotency_state", new[] { "PROCESSING", "COMPLETED" })
             .HasPostgresEnum("transaction_status", new[] { "PENDING", "SUCCESS", "FAILED" })
             .HasPostgresEnum("transaction_type", new[] { "DEPOSIT", "WITHDRAW", "TRANSFER" })
             .HasPostgresEnum("user_role", new[] { "ADMIN", "CLIENT" });
@@ -53,7 +48,7 @@ public partial class BankOsDbContext : IdentityDbContext
 
             entity.HasIndex(e => new { e.TenantId, e.AccountNumber }, "idx_accounts_tenant_account_number").IsUnique();
 
-            entity.HasIndex(e => new { e.TenantId, e.OwnerId }, "idx_accounts_tenant_owner");
+            entity.HasIndex(e => new { e.TenantId, e.OwnerId }, "idx_accounts_tenant_owner").IsUnique();
 
             entity.HasIndex(e => new { e.TenantId, e.Id }, "uq_accounts_tenant_id_id").IsUnique();
 
@@ -123,87 +118,6 @@ public partial class BankOsDbContext : IdentityDbContext
                 .HasConstraintName("fk_audit_user_same_tenant");
         });
 
-        modelBuilder.Entity<ExchangeRate>(entity =>
-        {
-            entity.HasKey(e => e.Id).HasName("exchange_rates_pkey");
-
-            entity.ToTable("exchange_rates");
-            entity.ToTable(t =>
-            {
-                t.HasCheckConstraint("chk_er_from", "from_currency ~ '^[A-Z]{3}$'");
-                t.HasCheckConstraint("chk_er_to", "to_currency ~ '^[A-Z]{3}$'");
-                t.HasCheckConstraint("chk_exchange_different_currency", "from_currency <> to_currency");
-                t.HasCheckConstraint("chk_exchange_rate_positive", "rate > 0");
-            });
-
-            entity.HasIndex(e => new { e.TenantId, e.FromCurrency, e.ToCurrency }, "idx_exchange_rates_tenant_pair").IsUnique();
-
-            entity.Property(e => e.Id)
-                .ValueGeneratedNever()
-                .HasColumnName("id");
-            entity.Property(e => e.CreatedAt)
-                .HasDefaultValueSql("now()")
-                .HasColumnName("created_at");
-            entity.Property(e => e.FromCurrency)
-                .HasMaxLength(3)
-                .HasColumnName("from_currency");
-            entity.Property(e => e.Rate)
-                .HasPrecision(18, 8)
-                .HasColumnName("rate");
-            entity.Property(e => e.TenantId).HasColumnName("tenant_id");
-            entity.Property(e => e.ToCurrency)
-                .HasMaxLength(3)
-                .HasColumnName("to_currency");
-
-            entity.HasOne(d => d.Tenant).WithMany(p => p.ExchangeRates)
-                .HasForeignKey(d => d.TenantId)
-                .OnDelete(DeleteBehavior.Restrict)
-                .HasConstraintName("exchange_rates_tenant_id_fkey");
-        });
-
-        modelBuilder.Entity<IdempotencyRecord>(entity =>
-        {
-            entity.HasKey(e => e.Id).HasName("idempotency_records_pkey");
-
-            entity.ToTable("idempotency_records");
-            entity.ToTable(t =>
-            {
-                t.HasCheckConstraint("chk_idempotency_expiration", "expires_at > created_at");
-            });
-
-            entity.HasIndex(e => new { e.TenantId, e.UserId, e.IdempotencyKey }, "idempotency_records_tenant_id_user_id_idempotency_key_key").IsUnique();
-
-            entity.HasIndex(e => e.ExpiresAt, "idx_idempotency_expiration");
-
-            entity.HasIndex(e => e.IdempotencyKey, "idx_idempotency_key");
-
-            entity.Property(e => e.Id)
-                .ValueGeneratedNever()
-                .HasColumnName("id");
-            entity.Property(e => e.CreatedAt)
-                .HasDefaultValueSql("now()")
-                .HasColumnName("created_at");
-            entity.Property(e => e.ExpiresAt).HasColumnName("expires_at");
-            entity.Property(e => e.IdempotencyKey).HasColumnName("idempotency_key");
-            entity.Property(e => e.RequestHash).HasColumnName("request_hash");
-            entity.Property(e => e.ResponseBody)
-                .HasColumnType("jsonb")
-                .HasColumnName("response_body");
-            entity.Property(e => e.State)
-                .HasDefaultValueSql("'PROCESSING'::idempotency_state")
-                .HasColumnName("state")
-                .HasColumnType("idempotency_state");
-            entity.Property(e => e.StatusCode).HasColumnName("status_code");
-            entity.Property(e => e.TenantId).HasColumnName("tenant_id");
-            entity.Property(e => e.UserId).HasColumnName("user_id");
-
-            entity.HasOne(d => d.User).WithMany(p => p.IdempotencyRecords)
-                .HasPrincipalKey(p => new { p.TenantId, p.Id })
-                .HasForeignKey(d => new { d.TenantId, d.UserId })
-                .OnDelete(DeleteBehavior.Restrict)
-                .HasConstraintName("fk_idempotency_user_same_tenant");
-        });
-
         modelBuilder.Entity<Tenant>(entity =>
         {
             entity.HasKey(e => e.Id).HasName("tenants_pkey");
@@ -269,7 +183,6 @@ public partial class BankOsDbContext : IdentityDbContext
 
             entity.ToTable(t =>
             {
-                t.HasCheckConstraint("chk_trans_converted_amount_positive", "converted_amount IS NULL OR converted_amount > 0");
                 t.HasCheckConstraint("chk_trans_fee_positive", "fee_amount >= 0");
                 t.HasCheckConstraint("chk_trans_original_amount_positive", "original_amount > 0");
                 t.HasCheckConstraint("chk_transaction_account_shape", """
@@ -282,22 +195,15 @@ public partial class BankOsDbContext : IdentityDbContext
             entity.Property(e => e.Id)
                 .ValueGeneratedNever()
                 .HasColumnName("id");
-            entity.Property(e => e.ConvertedAmount)
-                .HasPrecision(18, 2)
-                .HasColumnName("converted_amount");
             entity.Property(e => e.CorrelationId).HasColumnName("correlation_id");
             entity.Property(e => e.CreatedAt)
                 .HasDefaultValueSql("now()")
                 .HasColumnName("created_at");
             entity.Property(e => e.DestinationAccountId).HasColumnName("destination_account_id");
-            entity.Property(e => e.ExchangeRate)
-                .HasPrecision(18, 8)
-                .HasColumnName("exchange_rate");
             entity.Property(e => e.FeeAmount)
                 .HasPrecision(18, 2)
                 .HasDefaultValue(0m)
                 .HasColumnName("fee_amount");
-            entity.Property(e => e.IdempotencyKey).HasColumnName("idempotency_key");
             entity.Property(e => e.OriginalAmount)
                 .HasPrecision(18, 2)
                 .HasColumnName("original_amount");
@@ -337,6 +243,8 @@ public partial class BankOsDbContext : IdentityDbContext
 
             entity.ToTable("users");
 
+            entity.HasIndex(e => new { e.TenantId, e.DocumentNumber }, "uq_users_tenant_document_number").IsUnique();
+
             entity.HasIndex(e => new { e.TenantId, e.Id }, "uq_users_tenant_id_id").IsUnique();
 
             entity.Property(e => e.Id)
@@ -345,6 +253,9 @@ public partial class BankOsDbContext : IdentityDbContext
             entity.Property(e => e.CreatedAt)
                 .HasDefaultValueSql("now()")
                 .HasColumnName("created_at");
+            entity.Property(e => e.DocumentNumber)
+                .HasMaxLength(64)
+                .HasColumnName("document_number");
             entity.Property(e => e.Email)
                 .HasMaxLength(150)
                 .HasColumnName("email");

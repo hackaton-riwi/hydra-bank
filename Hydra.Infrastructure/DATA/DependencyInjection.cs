@@ -1,4 +1,5 @@
 using Hydra.Infrastructure.DATA;
+using Hydra.Domain.Entities;
 using Hydra.Domain.Enums;
 using Microsoft.AspNetCore.Identity;
 using Microsoft.EntityFrameworkCore;
@@ -19,7 +20,6 @@ public static class DependencyInjection
                 npgsqlOptions => npgsqlOptions
                     .MapEnum<AccountStatus>("account_status")
                     .MapEnum<FeeTypeEnum>("fee_type_enum")
-                    .MapEnum<IdempotencyState>("idempotency_state")
                     .MapEnum<TransactionStatus>("transaction_status")
                     .MapEnum<TransactionType>("transaction_type")
                     .MapEnum<UserRole>("user_role")));
@@ -35,6 +35,8 @@ public static class DependencyInjection
             .AddRoles<IdentityRole>()
             .AddEntityFrameworkStores<BankOsDbContext>()
             .AddDefaultTokenProviders();
+
+        services.AddScoped<IPasswordHasher<User>, PasswordHasher<User>>();
 
         return services;
     }
