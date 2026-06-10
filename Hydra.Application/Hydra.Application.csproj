@@ -1,12 +1,12 @@
 ﻿<Project Sdk="Microsoft.NET.Sdk">
 
   <ItemGroup>
-    <ProjectReference Include="..\Hydra.Domain\Hydra.Domain.csproj" />
-    <ProjectReference Include="..\Hydra.Infrastructure\Hydra.Infrastructure.csproj" />
+    <PackageReference Include="Microsoft.Extensions.Caching.Abstractions" Version="10.0.9" />
   </ItemGroup>
 
   <ItemGroup>
-    <Folder Include="Validators\" />
+    <ProjectReference Include="..\Hydra.Domain\Hydra.Domain.csproj" />
+    <ProjectReference Include="..\Hydra.Infrastructure\Hydra.Infrastructure.csproj" />
   </ItemGroup>
 
   <PropertyGroup>

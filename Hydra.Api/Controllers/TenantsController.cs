@@ -13,12 +13,15 @@ using BankUser = Hydra.Domain.Entities.User;
 namespace Hydra.Api.Controllers;
 
 [ApiController]
-[Route("api/[controller]")]
-[Authorize(Roles = "SUPERADMIN")]
+[Route("api/v1/tenants")]
 [EnableRateLimiting("financial")]
 public class TenantsController : ControllerBase
 {
     private static readonly Regex SlugRegex = new("^[a-z0-9]+(?:-[a-z0-9]+)*$", RegexOptions.Compiled);
+    private static readonly Regex InvalidSlugCharactersRegex = new("[^a-z0-9]+", RegexOptions.Compiled);
+    private const string DefaultMainCurrency = "USD";
+    private const decimal DefaultMaxTransactionAmount = 5_000_000m;
+    private const decimal DefaultFeeValue = 0m;
     private const string TenantAdminRole = "ADMIN";
 
     private readonly BankOsDbContext _dbContext;
@@ -39,10 +42,11 @@ public class TenantsController : ControllerBase
     }
 
     [HttpPost]
+    [AllowAnonymous]
     public async Task<IActionResult> Create(CreateTenantDto request)
     {
-        var slug = request.Slug.Trim().ToLowerInvariant();
-        var mainCurrency = request.MainCurrency.Trim().ToUpperInvariant();
+        var tenantName = request.NombreTenant.Trim();
+        var slug = BuildSlug(tenantName);
 
         if (!SlugRegex.IsMatch(slug))
         {
@@ -52,31 +56,13 @@ public class TenantsController : ControllerBase
             });
         }
 
-        if (!Enum.TryParse<FeeTypeEnum>(request.FeeType.Trim(), ignoreCase: true, out var feeType))
-        {
-            return BadRequest(new
-            {
-                message = "FeeType debe ser FIXED o PERCENTAGE"
-            });
-        }
-
-        if (feeType == FeeTypeEnum.PERCENTAGE && request.FeeValue > 100)
-        {
-            return BadRequest(new
-            {
-                message = "FeeValue no puede ser mayor a 100 cuando FeeType es PERCENTAGE"
-            });
-        }
-
         if (await _dbContext.Tenants.AnyAsync(tenant => tenant.Slug == slug))
         {
-            return Conflict(new
-            {
-                message = "Ya existe un tenant con ese slug"
-            });
+            var slugPrefix = slug.Length > 41 ? slug[..41].Trim('-') : slug;
+            slug = $"{slugPrefix}-{Guid.NewGuid():N}"[..50].Trim('-');
         }
 
-        var adminEmail = request.AdminEmail.Trim().ToLowerInvariant();
+        var adminEmail = request.Correo.Trim().ToLowerInvariant();
 
         if (await _dbContext.BankUsers.AnyAsync(user => user.Email.ToLower() == adminEmail))
         {
@@ -94,6 +80,8 @@ public class TenantsController : ControllerBase
             });
         }
 
+        var adminPassword = BuildAdminPassword();
+
         if (!await _roleManager.RoleExistsAsync(TenantAdminRole))
         {
             await _roleManager.CreateAsync(new IdentityRole(TenantAdminRole));
@@ -103,13 +91,13 @@ public class TenantsController : ControllerBase
         var tenant = new Tenant
         {
             Id = Guid.NewGuid(),
-            Name = request.Name.Trim(),
+            Name = tenantName,
             Slug = slug,
-            MainCurrency = mainCurrency,
-            MaxTransactionAmount = request.MaxTransactionAmount,
-            FeeType = feeType,
-            FeeValue = request.FeeValue,
-            WebhookUrl = string.IsNullOrWhiteSpace(request.WebhookUrl) ? null : request.WebhookUrl.Trim(),
+            MainCurrency = DefaultMainCurrency,
+            MaxTransactionAmount = DefaultMaxTransactionAmount,
+            FeeType = FeeTypeEnum.FIXED,
+            FeeValue = DefaultFeeValue,
+            WebhookUrl = null,
             CreatedAt = now,
             UpdatedAt = now
         };
@@ -118,13 +106,13 @@ public class TenantsController : ControllerBase
         {
             Id = Guid.NewGuid(),
             TenantId = tenant.Id,
-            FullName = request.AdminFullName.Trim(),
+            FullName = $"Administrador {tenantName}",
             Email = adminEmail,
             Role = UserRole.ADMIN,
             CreatedAt = now,
             UpdatedAt = now
         };
-        bankAdmin.PasswordHash = _passwordHasher.HashPassword(bankAdmin, request.AdminPassword);
+        bankAdmin.PasswordHash = _passwordHasher.HashPassword(bankAdmin, adminPassword);
 
         var identityAdmin = new IdentityUser
         {
@@ -139,7 +127,7 @@ public class TenantsController : ControllerBase
         _dbContext.BankUsers.Add(bankAdmin);
         await _dbContext.SaveChangesAsync();
 
-        var identityResult = await _userManager.CreateAsync(identityAdmin, request.AdminPassword);
+        var identityResult = await _userManager.CreateAsync(identityAdmin, adminPassword);
 
         if (!identityResult.Succeeded)
         {
@@ -158,7 +146,7 @@ public class TenantsController : ControllerBase
 
         await transaction.CommitAsync();
 
-        return Created($"/api/tenants/{tenant.Id}", new
+        return Created($"/api/v1/tenants/{tenant.Id}", new
         {
             tenant = new
             {
@@ -180,8 +168,24 @@ public class TenantsController : ControllerBase
                 bankAdmin.FullName,
                 bankAdmin.Email,
                 Role = bankAdmin.Role.ToString(),
+                temporaryPassword = adminPassword,
                 bankAdmin.CreatedAt
             }
         });
+    }
+
+    private static string BuildSlug(string tenantName)
+    {
+        var rawSlug = tenantName.Trim().ToLowerInvariant();
+        var slug = InvalidSlugCharactersRegex.Replace(rawSlug, "-").Trim('-');
+
+        return string.IsNullOrWhiteSpace(slug)
+            ? $"tenant-{Guid.NewGuid():N}"[..50]
+            : slug.Length <= 50 ? slug : slug[..50].Trim('-');
+    }
+
+    private static string BuildAdminPassword()
+    {
+        return $"Admin{Guid.NewGuid():N}"[..12] + "a1";
     }
 }

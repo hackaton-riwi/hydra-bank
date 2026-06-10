@@ -9,11 +9,13 @@ using Microsoft.IdentityModel.Tokens;
 using System.IdentityModel.Tokens.Jwt;
 using System.Security.Claims;
 using System.Text;
+using BankUser = Hydra.Domain.Entities.User;
+using Hydra.Domain.Enums;
 
 namespace Hydra.Api.Controllers;
 
 [ApiController]
-[Route("api/[controller]")]
+[Route("api/v1/auth")]
 [EnableRateLimiting("auth")]
 public class AuthController : ControllerBase
 {
@@ -25,82 +27,132 @@ public class AuthController : ControllerBase
     private readonly RoleManager<IdentityRole> _roleManager;
     private readonly BankOsDbContext _dbContext;
     private readonly IConfiguration _configuration;
+    private readonly IPasswordHasher<BankUser> _passwordHasher;
 
     public AuthController(
         UserManager<IdentityUser> userManager,
         RoleManager<IdentityRole> roleManager,
         BankOsDbContext dbContext,
-        IConfiguration configuration)
+        IConfiguration configuration,
+        IPasswordHasher<BankUser> passwordHasher)
     {
         _userManager = userManager;
         _roleManager = roleManager;
         _dbContext = dbContext;
         _configuration = configuration;
+        _passwordHasher = passwordHasher;
     }
 
     [HttpPost("register")]
     [AllowAnonymous]
-    public async Task<IActionResult> Register(RegisterDto request)
+    public async Task<IActionResult> Register(RegisterTenantClientDto request)
     {
         var email = request.Email.Trim().ToLowerInvariant();
+        var tenantSlug = request.TenantSlug.Trim().ToLowerInvariant();
 
-        if (await _userManager.FindByEmailAsync(email) is not null)
+        var tenant = await _dbContext.Tenants
+            .SingleOrDefaultAsync(x => x.Slug == tenantSlug);
+
+        if (tenant is null)
         {
-            return Conflict(new
-            {
-                message = "Ya existe un usuario con ese correo"
-            });
+            return NotFound(Error("TENANT_NOT_FOUND", "Tenant no encontrado"));
+        }
+
+        if (await _userManager.FindByEmailAsync(email) is not null ||
+            await _dbContext.BankUsers.AnyAsync(x => x.TenantId == tenant.Id && x.Email.ToLower() == email))
+        {
+            return Conflict(Error("EMAIL_ALREADY_EXISTS", "Ya existe un usuario con ese correo"));
         }
 
         await EnsureDefaultRolesExist();
 
-        var user = new IdentityUser
+        var identityUser = new IdentityUser
         {
             UserName = email,
             Email = email,
             EmailConfirmed = true
         };
 
-        var result = await _userManager.CreateAsync(user, request.Password);
-
-        if (!result.Succeeded)
+        var now = DateTime.UtcNow;
+        var bankUser = new BankUser
         {
-            return BadRequest(result.Errors);
+            Id = Guid.NewGuid(),
+            TenantId = tenant.Id,
+            FullName = request.FullName.Trim(),
+            Email = email,
+            Role = UserRole.CLIENT,
+            CreatedAt = now,
+            UpdatedAt = now
+        };
+        bankUser.PasswordHash = _passwordHasher.HashPassword(bankUser, request.Password);
+
+        await using var transaction = await _dbContext.Database.BeginTransactionAsync();
+
+        _dbContext.BankUsers.Add(bankUser);
+        await _dbContext.SaveChangesAsync();
+
+        var identityResult = await _userManager.CreateAsync(identityUser, request.Password);
+
+        if (!identityResult.Succeeded)
+        {
+            await transaction.RollbackAsync();
+            return BadRequest(identityResult.Errors);
         }
 
-        var roleResult = await _userManager.AddToRoleAsync(user, ClientRole);
+        var roleResult = await _userManager.AddToRoleAsync(identityUser, ClientRole);
 
         if (!roleResult.Succeeded)
         {
-            await _userManager.DeleteAsync(user);
+            await transaction.RollbackAsync();
+            await _userManager.DeleteAsync(identityUser);
             return BadRequest(roleResult.Errors);
         }
 
-        var roles = await _userManager.GetRolesAsync(user);
-        var expiresAt = DateTime.UtcNow.AddMinutes(GetTokenExpirationMinutes());
-        var bankUser = await FindBankUserAsync(user);
-        var token = GenerateJwtToken(user, roles, bankUser, expiresAt);
+        await transaction.CommitAsync();
 
-        return Ok(BuildAuthResponse(token, expiresAt, user, roles, bankUser));
+        var roles = await _userManager.GetRolesAsync(identityUser);
+        var expiresAt = DateTime.UtcNow.AddMinutes(GetTokenExpirationMinutes());
+        var token = GenerateJwtToken(identityUser, roles, bankUser, expiresAt);
+
+        return Created("/api/v1/auth/register", BuildAuthResponse(token, expiresAt, identityUser, roles, bankUser));
     }
 
     [HttpPost("login")]
     [AllowAnonymous]
     public async Task<IActionResult> Login(LoginDto request)
     {
-        var user = await _userManager.FindByEmailAsync(request.Email.Trim());
+        var email = request.Email.Trim().ToLowerInvariant();
+        var tenantSlug = request.TenantSlug.Trim().ToLowerInvariant();
+
+        var tenant = await _dbContext.Tenants
+            .AsNoTracking()
+            .SingleOrDefaultAsync(x => x.Slug == tenantSlug);
+
+        if (tenant is null)
+        {
+            return Unauthorized(Error("INVALID_TENANT_CREDENTIALS", "Credenciales inválidas para el tenant"));
+        }
+
+        var bankUser = await _dbContext.BankUsers
+            .AsNoTracking()
+            .SingleOrDefaultAsync(x =>
+                x.TenantId == tenant.Id &&
+                x.Email.ToLower() == email);
+
+        if (bankUser is null)
+        {
+            return Unauthorized(Error("INVALID_TENANT_CREDENTIALS", "Credenciales inválidas para el tenant"));
+        }
+
+        var user = await _userManager.FindByEmailAsync(email);
 
         if (user is null || !await _userManager.CheckPasswordAsync(user, request.Password))
         {
-            return Unauthorized(new
-            {
-                message = "Credenciales inválidas"
-            });
+            return Unauthorized(Error("INVALID_TENANT_CREDENTIALS", "Credenciales inválidas para el tenant"));
         }
 
         var roles = await _userManager.GetRolesAsync(user);
         var expiresAt = DateTime.UtcNow.AddMinutes(GetTokenExpirationMinutes());
-        var bankUser = await FindBankUserAsync(user);
         var token = GenerateJwtToken(user, roles, bankUser, expiresAt);
 
         return Ok(BuildAuthResponse(token, expiresAt, user, roles, bankUser));
@@ -237,7 +289,7 @@ public class AuthController : ControllerBase
         };
     }
 
-    private async Task<Hydra.Domain.Entities.User?> FindBankUserAsync(IdentityUser user)
+    private async Task<BankUser?> FindBankUserAsync(IdentityUser user)
     {
         if (string.IsNullOrWhiteSpace(user.Email))
         {
@@ -249,5 +301,15 @@ public class AuthController : ControllerBase
         return await _dbContext.BankUsers
             .AsNoTracking()
             .SingleOrDefaultAsync(bankUser => bankUser.Email.ToLower() == email);
+    }
+
+    private static object Error(string code, string description)
+    {
+        return new
+        {
+            success = false,
+            code,
+            description
+        };
     }
 }
