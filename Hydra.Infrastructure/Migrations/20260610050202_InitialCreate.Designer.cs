@@ -4,17 +4,20 @@ using Hydra.Domain.Enums;
 using Hydra.Infrastructure.DATA;
 using Microsoft.EntityFrameworkCore;
 using Microsoft.EntityFrameworkCore.Infrastructure;
+using Microsoft.EntityFrameworkCore.Migrations;
 using Microsoft.EntityFrameworkCore.Storage.ValueConversion;
 using Npgsql.EntityFrameworkCore.PostgreSQL.Metadata;
 
 #nullable disable
 
-namespace Hydra.Infrastructure.DATA.Migrations
+namespace Hydra.Infrastructure.Migrations
 {
     [DbContext(typeof(BankOsDbContext))]
-    partial class BankOsDbContextModelSnapshot : ModelSnapshot
+    [Migration("20260610050202_InitialCreate")]
+    partial class InitialCreate
     {
-        protected override void BuildModel(ModelBuilder modelBuilder)
+        /// <inheritdoc />
+        protected override void BuildTargetModel(ModelBuilder modelBuilder)
         {
 #pragma warning disable 612, 618
             modelBuilder

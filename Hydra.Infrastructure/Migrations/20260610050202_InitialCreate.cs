@@ -5,7 +5,7 @@ using Npgsql.EntityFrameworkCore.PostgreSQL.Metadata;
 
 #nullable disable
 
-namespace Hydra.Infrastructure.DATA.Migrations
+namespace Hydra.Infrastructure.Migrations
 {
     /// <inheritdoc />
     public partial class InitialCreate : Migration

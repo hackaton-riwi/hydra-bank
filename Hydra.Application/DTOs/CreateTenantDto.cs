@@ -27,4 +27,17 @@ public class CreateTenantDto
 
     [Url]
     public string? WebhookUrl { get; set; }
+
+    [Required]
+    [MaxLength(150)]
+    public string AdminFullName { get; set; } = string.Empty;
+
+    [Required]
+    [EmailAddress]
+    [MaxLength(150)]
+    public string AdminEmail { get; set; } = string.Empty;
+
+    [Required]
+    [MinLength(6)]
+    public string AdminPassword { get; set; } = string.Empty;
 }

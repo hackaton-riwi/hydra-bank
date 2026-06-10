@@ -4,23 +4,38 @@ using Hydra.Domain.Entities;
 using Hydra.Domain.Enums;
 using Hydra.Infrastructure.DATA;
 using Microsoft.AspNetCore.Authorization;
+using Microsoft.AspNetCore.Identity;
 using Microsoft.AspNetCore.Mvc;
+using Microsoft.AspNetCore.RateLimiting;
 using Microsoft.EntityFrameworkCore;
+using BankUser = Hydra.Domain.Entities.User;
 
 namespace Hydra.Api.Controllers;
 
 [ApiController]
 [Route("api/[controller]")]
-[Authorize(Roles = "ADMIN")]
+[Authorize(Roles = "SUPERADMIN")]
+[EnableRateLimiting("financial")]
 public class TenantsController : ControllerBase
 {
     private static readonly Regex SlugRegex = new("^[a-z0-9]+(?:-[a-z0-9]+)*$", RegexOptions.Compiled);
+    private const string TenantAdminRole = "ADMIN";
 
     private readonly BankOsDbContext _dbContext;
+    private readonly UserManager<IdentityUser> _userManager;
+    private readonly RoleManager<IdentityRole> _roleManager;
+    private readonly IPasswordHasher<BankUser> _passwordHasher;
 
-    public TenantsController(BankOsDbContext dbContext)
+    public TenantsController(
+        BankOsDbContext dbContext,
+        UserManager<IdentityUser> userManager,
+        RoleManager<IdentityRole> roleManager,
+        IPasswordHasher<BankUser> passwordHasher)
     {
         _dbContext = dbContext;
+        _userManager = userManager;
+        _roleManager = roleManager;
+        _passwordHasher = passwordHasher;
     }
 
     [HttpPost]
@@ -61,6 +76,29 @@ public class TenantsController : ControllerBase
             });
         }
 
+        var adminEmail = request.AdminEmail.Trim().ToLowerInvariant();
+
+        if (await _dbContext.BankUsers.AnyAsync(user => user.Email.ToLower() == adminEmail))
+        {
+            return Conflict(new
+            {
+                message = "Ya existe un usuario bancario con ese correo"
+            });
+        }
+
+        if (await _userManager.FindByEmailAsync(adminEmail) is not null)
+        {
+            return Conflict(new
+            {
+                message = "Ya existe un usuario de autenticación con ese correo"
+            });
+        }
+
+        if (!await _roleManager.RoleExistsAsync(TenantAdminRole))
+        {
+            await _roleManager.CreateAsync(new IdentityRole(TenantAdminRole));
+        }
+
         var now = DateTime.UtcNow;
         var tenant = new Tenant
         {
@@ -76,8 +114,49 @@ public class TenantsController : ControllerBase
             UpdatedAt = now
         };
 
+        var bankAdmin = new BankUser
+        {
+            Id = Guid.NewGuid(),
+            TenantId = tenant.Id,
+            FullName = request.AdminFullName.Trim(),
+            Email = adminEmail,
+            Role = UserRole.ADMIN,
+            CreatedAt = now,
+            UpdatedAt = now
+        };
+        bankAdmin.PasswordHash = _passwordHasher.HashPassword(bankAdmin, request.AdminPassword);
+
+        var identityAdmin = new IdentityUser
+        {
+            UserName = adminEmail,
+            Email = adminEmail,
+            EmailConfirmed = true
+        };
+
+        await using var transaction = await _dbContext.Database.BeginTransactionAsync();
+
         _dbContext.Tenants.Add(tenant);
+        _dbContext.BankUsers.Add(bankAdmin);
         await _dbContext.SaveChangesAsync();
+
+        var identityResult = await _userManager.CreateAsync(identityAdmin, request.AdminPassword);
+
+        if (!identityResult.Succeeded)
+        {
+            await transaction.RollbackAsync();
+            return BadRequest(identityResult.Errors);
+        }
+
+        var roleResult = await _userManager.AddToRoleAsync(identityAdmin, TenantAdminRole);
+
+        if (!roleResult.Succeeded)
+        {
+            await transaction.RollbackAsync();
+            await _userManager.DeleteAsync(identityAdmin);
+            return BadRequest(roleResult.Errors);
+        }
+
+        await transaction.CommitAsync();
 
         return Created($"/api/tenants/{tenant.Id}", new
         {
@@ -93,6 +172,15 @@ public class TenantsController : ControllerBase
                 tenant.WebhookUrl,
                 tenant.CreatedAt,
                 tenant.UpdatedAt
+            },
+            admin = new
+            {
+                bankAdmin.Id,
+                bankAdmin.TenantId,
+                bankAdmin.FullName,
+                bankAdmin.Email,
+                Role = bankAdmin.Role.ToString(),
+                bankAdmin.CreatedAt
             }
         });
     }

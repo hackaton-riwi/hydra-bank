@@ -1,7 +1,9 @@
 using Hydra.Application.DTOs;
+using Hydra.Infrastructure.DATA;
 using Microsoft.AspNetCore.Authorization;
 using Microsoft.AspNetCore.Identity;
 using Microsoft.AspNetCore.Mvc;
+using Microsoft.AspNetCore.RateLimiting;
 using Microsoft.EntityFrameworkCore;
 using Microsoft.IdentityModel.Tokens;
 using System.IdentityModel.Tokens.Jwt;
@@ -12,22 +14,27 @@ namespace Hydra.Api.Controllers;
 
 [ApiController]
 [Route("api/[controller]")]
+[EnableRateLimiting("auth")]
 public class AuthController : ControllerBase
 {
+    private const string SuperAdminRole = "SUPERADMIN";
     private const string AdminRole = "ADMIN";
     private const string ClientRole = "CLIENT";
 
     private readonly UserManager<IdentityUser> _userManager;
     private readonly RoleManager<IdentityRole> _roleManager;
+    private readonly BankOsDbContext _dbContext;
     private readonly IConfiguration _configuration;
 
     public AuthController(
         UserManager<IdentityUser> userManager,
         RoleManager<IdentityRole> roleManager,
+        BankOsDbContext dbContext,
         IConfiguration configuration)
     {
         _userManager = userManager;
         _roleManager = roleManager;
+        _dbContext = dbContext;
         _configuration = configuration;
     }
 
@@ -36,7 +43,16 @@ public class AuthController : ControllerBase
     public async Task<IActionResult> Register(RegisterDto request)
     {
         var email = request.Email.Trim();
-        var role = await _userManager.Users.AnyAsync() ? ClientRole : AdminRole;
+
+        if (await _userManager.Users.AnyAsync())
+        {
+            return StatusCode(StatusCodes.Status403Forbidden, new
+            {
+                message = "El registro público solo está habilitado para crear el primer SUPERADMIN. Los usuarios de tenant deben crearse dentro de su institución."
+            });
+        }
+
+        var role = SuperAdminRole;
         var user = new IdentityUser
         {
             UserName = email,
@@ -58,9 +74,10 @@ public class AuthController : ControllerBase
 
         var roles = await _userManager.GetRolesAsync(user);
         var expiresAt = DateTime.UtcNow.AddMinutes(GetTokenExpirationMinutes());
-        var token = GenerateJwtToken(user, roles, expiresAt);
+        var bankUser = await FindBankUserAsync(user);
+        var token = GenerateJwtToken(user, roles, bankUser, expiresAt);
 
-        return Ok(BuildAuthResponse(token, expiresAt, user, roles));
+        return Ok(BuildAuthResponse(token, expiresAt, user, roles, bankUser));
     }
 
     [HttpPost("login")]
@@ -79,9 +96,10 @@ public class AuthController : ControllerBase
 
         var roles = await _userManager.GetRolesAsync(user);
         var expiresAt = DateTime.UtcNow.AddMinutes(GetTokenExpirationMinutes());
-        var token = GenerateJwtToken(user, roles, expiresAt);
+        var bankUser = await FindBankUserAsync(user);
+        var token = GenerateJwtToken(user, roles, bankUser, expiresAt);
 
-        return Ok(BuildAuthResponse(token, expiresAt, user, roles));
+        return Ok(BuildAuthResponse(token, expiresAt, user, roles, bankUser));
     }
 
     [HttpGet("me")]
@@ -109,16 +127,17 @@ public class AuthController : ControllerBase
         }
 
         var roles = await _userManager.GetRolesAsync(user);
+        var bankUser = await FindBankUserAsync(user);
 
         return Ok(new
         {
-            user = BuildUserResponse(user, roles)
+            user = BuildUserResponse(user, roles, bankUser)
         });
     }
 
     private async Task EnsureDefaultRolesExist()
     {
-        foreach (var roleName in new[] { AdminRole, ClientRole })
+        foreach (var roleName in new[] { SuperAdminRole, AdminRole, ClientRole })
         {
             if (!await _roleManager.RoleExistsAsync(roleName))
             {
@@ -127,7 +146,11 @@ public class AuthController : ControllerBase
         }
     }
 
-    private string GenerateJwtToken(IdentityUser user, IEnumerable<string> roles, DateTime expiresAt)
+    private string GenerateJwtToken(
+        IdentityUser user,
+        IEnumerable<string> roles,
+        Hydra.Domain.Entities.User? bankUser,
+        DateTime expiresAt)
     {
         var jwtKey = _configuration["Jwt:Key"]
             ?? throw new InvalidOperationException("Jwt:Key no está configurado");
@@ -142,10 +165,22 @@ public class AuthController : ControllerBase
             new(JwtRegisteredClaimNames.Email, user.Email ?? string.Empty),
             new(JwtRegisteredClaimNames.Jti, Guid.NewGuid().ToString()),
             new(ClaimTypes.NameIdentifier, user.Id),
-            new(ClaimTypes.Email, user.Email ?? string.Empty)
+            new(ClaimTypes.Email, user.Email ?? string.Empty),
+            new("identity_user_id", user.Id)
         };
 
         claims.AddRange(roles.Select(role => new Claim(ClaimTypes.Role, role)));
+
+        if (bankUser is not null)
+        {
+            claims.Add(new Claim("tenant_id", bankUser.TenantId.ToString()));
+            claims.Add(new Claim("user_id", bankUser.Id.ToString()));
+            claims.Add(new Claim("tenant_role", bankUser.Role.ToString()));
+        }
+        else
+        {
+            claims.Add(new Claim("user_id", user.Id));
+        }
 
         var key = new SymmetricSecurityKey(Encoding.UTF8.GetBytes(jwtKey));
         var credentials = new SigningCredentials(key, SecurityAlgorithms.HmacSha256);
@@ -171,23 +206,44 @@ public class AuthController : ControllerBase
         string token,
         DateTime expiresAt,
         IdentityUser user,
-        IEnumerable<string> roles)
+        IEnumerable<string> roles,
+        Hydra.Domain.Entities.User? bankUser)
     {
         return new
         {
             token,
             expiresAt,
-            user = BuildUserResponse(user, roles)
+            user = BuildUserResponse(user, roles, bankUser)
         };
     }
 
-    private static object BuildUserResponse(IdentityUser user, IEnumerable<string> roles)
+    private static object BuildUserResponse(
+        IdentityUser user,
+        IEnumerable<string> roles,
+        Hydra.Domain.Entities.User? bankUser)
     {
         return new
         {
-            id = user.Id,
+            identityUserId = user.Id,
+            userId = bankUser?.Id.ToString() ?? user.Id,
+            tenantId = bankUser?.TenantId,
             email = user.Email,
-            roles = roles.ToArray()
+            roles = roles.ToArray(),
+            tenantRole = bankUser?.Role.ToString()
         };
+    }
+
+    private async Task<Hydra.Domain.Entities.User?> FindBankUserAsync(IdentityUser user)
+    {
+        if (string.IsNullOrWhiteSpace(user.Email))
+        {
+            return null;
+        }
+
+        var email = user.Email.Trim().ToLower();
+
+        return await _dbContext.BankUsers
+            .AsNoTracking()
+            .SingleOrDefaultAsync(bankUser => bankUser.Email.ToLower() == email);
     }
 }
