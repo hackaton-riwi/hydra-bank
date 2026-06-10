@@ -42,17 +42,18 @@ public class AuthController : ControllerBase
     [AllowAnonymous]
     public async Task<IActionResult> Register(RegisterDto request)
     {
-        var email = request.Email.Trim();
+        var email = request.Email.Trim().ToLowerInvariant();
 
-        if (await _userManager.Users.AnyAsync())
+        if (await _userManager.FindByEmailAsync(email) is not null)
         {
-            return StatusCode(StatusCodes.Status403Forbidden, new
+            return Conflict(new
             {
-                message = "El registro público solo está habilitado para crear el primer SUPERADMIN. Los usuarios de tenant deben crearse dentro de su institución."
+                message = "Ya existe un usuario con ese correo"
             });
         }
 
-        var role = SuperAdminRole;
+        await EnsureDefaultRolesExist();
+
         var user = new IdentityUser
         {
             UserName = email,
@@ -60,17 +61,20 @@ public class AuthController : ControllerBase
             EmailConfirmed = true
         };
 
-        var result = await _userManager.CreateAsync(
-            user,
-            request.Password);
+        var result = await _userManager.CreateAsync(user, request.Password);
 
         if (!result.Succeeded)
         {
             return BadRequest(result.Errors);
         }
 
-        await EnsureDefaultRolesExist();
-        await _userManager.AddToRoleAsync(user, role);
+        var roleResult = await _userManager.AddToRoleAsync(user, ClientRole);
+
+        if (!roleResult.Succeeded)
+        {
+            await _userManager.DeleteAsync(user);
+            return BadRequest(roleResult.Errors);
+        }
 
         var roles = await _userManager.GetRolesAsync(user);
         var expiresAt = DateTime.UtcNow.AddMinutes(GetTokenExpirationMinutes());

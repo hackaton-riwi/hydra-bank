@@ -6,6 +6,8 @@ using Microsoft.OpenApi;
 using System.Security.Claims;
 using System.Text;
 using System.Threading.RateLimiting;
+using Hydra.Application.Interfaces;
+using Hydra.Application.Services;
 using Hydra.Infrastructure;
 
 var builder = WebApplication.CreateBuilder(args);
@@ -41,6 +43,9 @@ if (Encoding.UTF8.GetByteCount(jwtKey) < 32)
 {
     throw new InvalidOperationException("Jwt:Key debe tener mínimo 32 caracteres para HmacSha256");
 }
+builder.Services.AddHttpContextAccessor();
+
+builder.Services.AddScoped<IAccountService, AccountService>();
 
 builder.Services.AddAuthentication(options =>
     {
@@ -107,9 +112,9 @@ if (app.Environment.IsDevelopment())
 
 app.UseHttpsRedirection();
 
+app.UseRateLimiter();
 app.UseAuthentication();
 app.UseAuthorization();
-app.UseRateLimiter();
 
 app.MapControllers();
 
