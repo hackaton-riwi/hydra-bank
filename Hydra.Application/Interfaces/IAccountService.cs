@@ -11,4 +11,12 @@ public interface IAccountService
     Task<object> RechargeAsync(RechargeAccountDto request);
 
     Task<object> GetTransactionsAsync(TransactionHistoryQueryDto query);
+
+    Task<TransferResponseDto> TransferAsync(TransferRequestDto dto);
+
+    Task<DepositResponseDto> DepositAsync(DepositRequestDto dto);
+
+    Task<WithdrawResponseDto> WithdrawAsync(WithdrawRequestDto dto);
+
+    string GetLastCorrelationId();
 }
