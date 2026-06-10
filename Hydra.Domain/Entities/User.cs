@@ -2,7 +2,7 @@
 using System.Collections.Generic;
 using Hydra.Domain.Enums;
 
-namespace Hydra.Infrastructure.Entidades;
+namespace Hydra.Domain.Entities;
 
 public partial class User
 {

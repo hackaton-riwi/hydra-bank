@@ -1,7 +1,7 @@
 ﻿using System;
 using System.Collections.Generic;
 
-namespace Hydra.Infrastructure.Entidades;
+namespace Hydra.Domain.Entities;
 
 public partial class ExchangeRate
 {
