@@ -22,6 +22,8 @@ public partial class BankOsDbContext : IdentityDbContext
 
     public virtual DbSet<Transaction> Transactions { get; set; }
 
+    public virtual DbSet<IdempotencyRecord> IdempotencyRecords { get; set; }
+
     public virtual DbSet<User> BankUsers { get; set; }
 
     protected override void OnModelCreating(ModelBuilder modelBuilder)
@@ -31,6 +33,7 @@ public partial class BankOsDbContext : IdentityDbContext
         modelBuilder
             .HasPostgresEnum("account_status", new[] { "ACTIVE", "INACTIVE", "BLOCKED" })
             .HasPostgresEnum("fee_type_enum", new[] { "FIXED", "PERCENTAGE" })
+            .HasPostgresEnum("idempotency_state", new[] { "PROCESSING", "COMPLETED", "FAILED" })
             .HasPostgresEnum("transaction_status", new[] { "PENDING", "SUCCESS", "FAILED" })
             .HasPostgresEnum("transaction_type", new[] { "DEPOSIT", "WITHDRAW", "TRANSFER" })
             .HasPostgresEnum("user_role", new[] { "ADMIN", "CLIENT" });
@@ -235,6 +238,49 @@ public partial class BankOsDbContext : IdentityDbContext
                 .HasForeignKey(d => new { d.TenantId, d.UserId })
                 .OnDelete(DeleteBehavior.Restrict)
                 .HasConstraintName("fk_transactions_user_same_tenant");
+        });
+
+        modelBuilder.Entity<IdempotencyRecord>(entity =>
+        {
+            entity.HasKey(e => e.Id).HasName("idempotency_records_pkey");
+
+            entity.ToTable("idempotency_records");
+            entity.ToTable(t =>
+            {
+                t.HasCheckConstraint("chk_idempotency_expiration", "expires_at > created_at");
+            });
+
+            entity.HasIndex(e => new { e.TenantId, e.UserId, e.IdempotencyKey }, "idempotency_records_tenant_id_user_id_idempotency_key_key").IsUnique();
+
+            entity.HasIndex(e => e.ExpiresAt, "idx_idempotency_expiration");
+
+            entity.HasIndex(e => e.IdempotencyKey, "idx_idempotency_key");
+
+            entity.Property(e => e.Id)
+                .ValueGeneratedNever()
+                .HasColumnName("id");
+            entity.Property(e => e.CreatedAt)
+                .HasDefaultValueSql("now()")
+                .HasColumnName("created_at");
+            entity.Property(e => e.ExpiresAt).HasColumnName("expires_at");
+            entity.Property(e => e.IdempotencyKey).HasColumnName("idempotency_key");
+            entity.Property(e => e.RequestHash).HasColumnName("request_hash");
+            entity.Property(e => e.ResponseBody)
+                .HasColumnType("jsonb")
+                .HasColumnName("response_body");
+            entity.Property(e => e.State)
+                .HasDefaultValueSql("'PROCESSING'::idempotency_state")
+                .HasColumnName("state")
+                .HasColumnType("idempotency_state");
+            entity.Property(e => e.StatusCode).HasColumnName("status_code");
+            entity.Property(e => e.TenantId).HasColumnName("tenant_id");
+            entity.Property(e => e.UserId).HasColumnName("user_id");
+
+            entity.HasOne(d => d.User).WithMany(p => p.IdempotencyRecords)
+                .HasPrincipalKey(p => new { p.TenantId, p.Id })
+                .HasForeignKey(d => new { d.TenantId, d.UserId })
+                .OnDelete(DeleteBehavior.Restrict)
+                .HasConstraintName("fk_idempotency_user_same_tenant");
         });
 
         modelBuilder.Entity<User>(entity =>

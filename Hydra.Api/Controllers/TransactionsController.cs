@@ -3,6 +3,7 @@ using Hydra.Application.Interfaces;
 using Hydra.Domain.Exceptions;
 using Microsoft.AspNetCore.Authorization;
 using Microsoft.AspNetCore.Mvc;
+using Microsoft.AspNetCore.RateLimiting;
 using System.Security.Claims;
 
 namespace Hydra.Api.Controllers;
@@ -10,6 +11,8 @@ namespace Hydra.Api.Controllers;
 [ApiController]
 [Route("api/v1/transactions")]
 [Authorize(Roles = "CLIENT")]
+[EnableRateLimiting("financial")]
+[ApiExplorerSettings(IgnoreApi = true)]
 public class TransactionsController : ControllerBase
 {
     private readonly ITransactionService _transactionService;
