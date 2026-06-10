@@ -8,7 +8,6 @@
     ".NETCoreApp,Version=v10.0": {
       "Hydra.Infrastructure/1.0.0": {
         "dependencies": {
-          "Hydra.Application": "1.0.0",
           "Hydra.Domain": "1.0.0",
           "Microsoft.AspNetCore.Identity.EntityFrameworkCore": "10.0.9",
           "Microsoft.EntityFrameworkCore": "10.0.9",
@@ -80,17 +79,6 @@
           }
         }
       },
-      "Hydra.Application/1.0.0": {
-        "dependencies": {
-          "Hydra.Domain": "1.0.0"
-        },
-        "runtime": {
-          "Hydra.Application.dll": {
-            "assemblyVersion": "1.0.0.0",
-            "fileVersion": "1.0.0.0"
-          }
-        }
-      },
       "Hydra.Domain/1.0.0": {
         "runtime": {
           "Hydra.Domain.dll": {
@@ -148,11 +136,6 @@
       "sha512": "sha512-PsNYgPOSW41Xx19gin7y4EdZAPteWr9Cb01XkdObxOsPzi+mgBupBEN7J7+erXFsROPOILM7MlIoO9QzL8+LGQ==",
       "path": "npgsql.entityframeworkcore.postgresql/10.0.2",
       "hashPath": "npgsql.entityframeworkcore.postgresql.10.0.2.nupkg.sha512"
-    },
-    "Hydra.Application/1.0.0": {
-      "type": "project",
-      "serviceable": false,
-      "sha512": ""
     },
     "Hydra.Domain/1.0.0": {
       "type": "project",

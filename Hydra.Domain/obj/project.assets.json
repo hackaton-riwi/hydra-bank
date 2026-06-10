@@ -8,19 +8,19 @@
     "net10.0": []
   },
   "packageFolders": {
-    "/home/duvan/.nuget/packages/": {}
+    "/home/mk1/.nuget/packages/": {}
   },
   "project": {
     "version": "1.0.0",
     "restore": {
-      "projectUniqueName": "/home/duvan/Documents/carpeta proyecto-hackaton/hydra-bank/Hydra.Domain/Hydra.Domain.csproj",
+      "projectUniqueName": "/home/mk1/HDD-1TB/hydra-bank/Hydra.Domain/Hydra.Domain.csproj",
       "projectName": "Hydra.Domain",
-      "projectPath": "/home/duvan/Documents/carpeta proyecto-hackaton/hydra-bank/Hydra.Domain/Hydra.Domain.csproj",
-      "packagesPath": "/home/duvan/.nuget/packages/",
-      "outputPath": "/home/duvan/Documents/carpeta proyecto-hackaton/hydra-bank/Hydra.Domain/obj/",
+      "projectPath": "/home/mk1/HDD-1TB/hydra-bank/Hydra.Domain/Hydra.Domain.csproj",
+      "packagesPath": "/home/mk1/.nuget/packages/",
+      "outputPath": "/home/mk1/HDD-1TB/hydra-bank/Hydra.Domain/obj/",
       "projectStyle": "PackageReference",
       "configFilePaths": [
-        "/home/duvan/.nuget/NuGet/NuGet.Config"
+        "/home/mk1/.nuget/NuGet/NuGet.Config"
       ],
       "originalTargetFrameworks": [
         "net10.0"

@@ -1,7 +1,6 @@
 ﻿<Project Sdk="Microsoft.NET.Sdk">
 
   <ItemGroup>
-    <ProjectReference Include="..\Hydra.Application\Hydra.Application.csproj" />
     <ProjectReference Include="..\Hydra.Domain\Hydra.Domain.csproj" />
   </ItemGroup>
 

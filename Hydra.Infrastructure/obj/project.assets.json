@@ -101,19 +101,6 @@
           }
         }
       },
-      "Hydra.Application/1.0.0": {
-        "type": "project",
-        "framework": ".NETCoreApp,Version=v10.0",
-        "dependencies": {
-          "Hydra.Domain": "1.0.0"
-        },
-        "compile": {
-          "bin/placeholder/Hydra.Application.dll": {}
-        },
-        "runtime": {
-          "bin/placeholder/Hydra.Application.dll": {}
-        }
-      },
       "Hydra.Domain/1.0.0": {
         "type": "project",
         "framework": ".NETCoreApp,Version=v10.0",
@@ -237,11 +224,6 @@
         "postgresql.png"
       ]
     },
-    "Hydra.Application/1.0.0": {
-      "type": "project",
-      "path": "../Hydra.Application/Hydra.Application.csproj",
-      "msbuildProject": "../Hydra.Application/Hydra.Application.csproj"
-    },
     "Hydra.Domain/1.0.0": {
       "type": "project",
       "path": "../Hydra.Domain/Hydra.Domain.csproj",
@@ -250,7 +232,6 @@
   },
   "projectFileDependencyGroups": {
     "net10.0": [
-      "Hydra.Application >= 1.0.0",
       "Hydra.Domain >= 1.0.0",
       "Microsoft.AspNetCore.Identity.EntityFrameworkCore >= 10.0.9",
       "Microsoft.EntityFrameworkCore >= 10.0.9",
@@ -258,19 +239,19 @@
     ]
   },
   "packageFolders": {
-    "/home/duvan/.nuget/packages/": {}
+    "/home/mk1/.nuget/packages/": {}
   },
   "project": {
     "version": "1.0.0",
     "restore": {
-      "projectUniqueName": "/home/duvan/Documents/carpeta proyecto-hackaton/hydra-bank/Hydra.Infrastructure/Hydra.Infrastructure.csproj",
+      "projectUniqueName": "/home/mk1/HDD-1TB/hydra-bank/Hydra.Infrastructure/Hydra.Infrastructure.csproj",
       "projectName": "Hydra.Infrastructure",
-      "projectPath": "/home/duvan/Documents/carpeta proyecto-hackaton/hydra-bank/Hydra.Infrastructure/Hydra.Infrastructure.csproj",
-      "packagesPath": "/home/duvan/.nuget/packages/",
-      "outputPath": "/home/duvan/Documents/carpeta proyecto-hackaton/hydra-bank/Hydra.Infrastructure/obj/",
+      "projectPath": "/home/mk1/HDD-1TB/hydra-bank/Hydra.Infrastructure/Hydra.Infrastructure.csproj",
+      "packagesPath": "/home/mk1/.nuget/packages/",
+      "outputPath": "/home/mk1/HDD-1TB/hydra-bank/Hydra.Infrastructure/obj/",
       "projectStyle": "PackageReference",
       "configFilePaths": [
-        "/home/duvan/.nuget/NuGet/NuGet.Config"
+        "/home/mk1/.nuget/NuGet/NuGet.Config"
       ],
       "originalTargetFrameworks": [
         "net10.0"
@@ -283,11 +264,8 @@
         "net10.0": {
           "targetAlias": "net10.0",
           "projectReferences": {
-            "/home/duvan/Documents/carpeta proyecto-hackaton/hydra-bank/Hydra.Application/Hydra.Application.csproj": {
-              "projectPath": "/home/duvan/Documents/carpeta proyecto-hackaton/hydra-bank/Hydra.Application/Hydra.Application.csproj"
-            },
-            "/home/duvan/Documents/carpeta proyecto-hackaton/hydra-bank/Hydra.Domain/Hydra.Domain.csproj": {
-              "projectPath": "/home/duvan/Documents/carpeta proyecto-hackaton/hydra-bank/Hydra.Domain/Hydra.Domain.csproj"
+            "/home/mk1/HDD-1TB/hydra-bank/Hydra.Domain/Hydra.Domain.csproj": {
+              "projectPath": "/home/mk1/HDD-1TB/hydra-bank/Hydra.Domain/Hydra.Domain.csproj"
             }
           }
         }

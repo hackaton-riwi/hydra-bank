@@ -14,3 +14,19 @@
 /home/duvan/Documents/carpeta proyecto-hackaton/hydra-bank/Hydra.Application/obj/Debug/net10.0/refint/Hydra.Application.dll
 /home/duvan/Documents/carpeta proyecto-hackaton/hydra-bank/Hydra.Application/obj/Debug/net10.0/Hydra.Application.pdb
 /home/duvan/Documents/carpeta proyecto-hackaton/hydra-bank/Hydra.Application/obj/Debug/net10.0/ref/Hydra.Application.dll
+/home/mk1/HDD-1TB/hydra-bank/Hydra.Application/bin/Debug/net10.0/Hydra.Application.deps.json
+/home/mk1/HDD-1TB/hydra-bank/Hydra.Application/bin/Debug/net10.0/Hydra.Application.dll
+/home/mk1/HDD-1TB/hydra-bank/Hydra.Application/bin/Debug/net10.0/Hydra.Application.pdb
+/home/mk1/HDD-1TB/hydra-bank/Hydra.Application/bin/Debug/net10.0/Hydra.Domain.dll
+/home/mk1/HDD-1TB/hydra-bank/Hydra.Application/bin/Debug/net10.0/Hydra.Domain.pdb
+/home/mk1/HDD-1TB/hydra-bank/Hydra.Application/obj/Debug/net10.0/Hydra.Application.csproj.AssemblyReference.cache
+/home/mk1/HDD-1TB/hydra-bank/Hydra.Application/obj/Debug/net10.0/Hydra.Application.GeneratedMSBuildEditorConfig.editorconfig
+/home/mk1/HDD-1TB/hydra-bank/Hydra.Application/obj/Debug/net10.0/Hydra.Application.AssemblyInfoInputs.cache
+/home/mk1/HDD-1TB/hydra-bank/Hydra.Application/obj/Debug/net10.0/Hydra.Application.AssemblyInfo.cs
+/home/mk1/HDD-1TB/hydra-bank/Hydra.Application/obj/Debug/net10.0/Hydra.Application.csproj.CoreCompileInputs.cache
+/home/mk1/HDD-1TB/hydra-bank/Hydra.Application/obj/Debug/net10.0/Hydra.Application.sourcelink.json
+/home/mk1/HDD-1TB/hydra-bank/Hydra.Application/obj/Debug/net10.0/Hydra.Ap.493AB07C.Up2Date
+/home/mk1/HDD-1TB/hydra-bank/Hydra.Application/obj/Debug/net10.0/Hydra.Application.dll
+/home/mk1/HDD-1TB/hydra-bank/Hydra.Application/obj/Debug/net10.0/refint/Hydra.Application.dll
+/home/mk1/HDD-1TB/hydra-bank/Hydra.Application/obj/Debug/net10.0/Hydra.Application.pdb
+/home/mk1/HDD-1TB/hydra-bank/Hydra.Application/obj/Debug/net10.0/ref/Hydra.Application.dll
