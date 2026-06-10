@@ -2,6 +2,7 @@ using Hydra.Application.DTOs;
 using Microsoft.AspNetCore.Authorization;
 using Microsoft.AspNetCore.Identity;
 using Microsoft.AspNetCore.Mvc;
+using Microsoft.EntityFrameworkCore;
 using Microsoft.IdentityModel.Tokens;
 using System.IdentityModel.Tokens.Jwt;
 using System.Security.Claims;
@@ -13,7 +14,8 @@ namespace Hydra.Api.Controllers;
 [Route("api/[controller]")]
 public class AuthController : ControllerBase
 {
-    private const string DefaultRole = "Customer";
+    private const string AdminRole = "ADMIN";
+    private const string ClientRole = "CLIENT";
 
     private readonly UserManager<IdentityUser> _userManager;
     private readonly RoleManager<IdentityRole> _roleManager;
@@ -33,10 +35,13 @@ public class AuthController : ControllerBase
     [AllowAnonymous]
     public async Task<IActionResult> Register(RegisterDto request)
     {
+        var email = request.Email.Trim();
+        var role = await _userManager.Users.AnyAsync() ? ClientRole : AdminRole;
         var user = new IdentityUser
         {
-            UserName = request.Email,
-            Email = request.Email
+            UserName = email,
+            Email = email,
+            EmailConfirmed = true
         };
 
         var result = await _userManager.CreateAsync(
@@ -48,21 +53,21 @@ public class AuthController : ControllerBase
             return BadRequest(result.Errors);
         }
 
-        await EnsureRoleExists(DefaultRole);
-        await _userManager.AddToRoleAsync(user, DefaultRole);
+        await EnsureDefaultRolesExist();
+        await _userManager.AddToRoleAsync(user, role);
 
-        return Ok(new
-        {
-            message = "Usuario creado correctamente",
-            role = DefaultRole
-        });
+        var roles = await _userManager.GetRolesAsync(user);
+        var expiresAt = DateTime.UtcNow.AddMinutes(GetTokenExpirationMinutes());
+        var token = GenerateJwtToken(user, roles, expiresAt);
+
+        return Ok(BuildAuthResponse(token, expiresAt, user, roles));
     }
 
     [HttpPost("login")]
     [AllowAnonymous]
     public async Task<IActionResult> Login(LoginDto request)
     {
-        var user = await _userManager.FindByEmailAsync(request.Email);
+        var user = await _userManager.FindByEmailAsync(request.Email.Trim());
 
         if (user is null || !await _userManager.CheckPasswordAsync(user, request.Password))
         {
@@ -76,24 +81,46 @@ public class AuthController : ControllerBase
         var expiresAt = DateTime.UtcNow.AddMinutes(GetTokenExpirationMinutes());
         var token = GenerateJwtToken(user, roles, expiresAt);
 
+        return Ok(BuildAuthResponse(token, expiresAt, user, roles));
+    }
+
+    [HttpGet("me")]
+    [Authorize]
+    public async Task<IActionResult> Me()
+    {
+        var userId = User.FindFirstValue(ClaimTypes.NameIdentifier);
+
+        if (string.IsNullOrWhiteSpace(userId))
+        {
+            return Unauthorized(new
+            {
+                message = "Token inválido"
+            });
+        }
+
+        var user = await _userManager.FindByIdAsync(userId);
+
+        if (user is null)
+        {
+            return Unauthorized(new
+            {
+                message = "Usuario no encontrado"
+            });
+        }
+
+        var roles = await _userManager.GetRolesAsync(user);
+
         return Ok(new
         {
-            token,
-            expiresAt,
-            user = new
-            {
-                id = user.Id,
-                email = user.Email,
-                roles
-            }
+            user = BuildUserResponse(user, roles)
         });
     }
 
     [HttpPost("roles")]
-    [Authorize(Roles = "Admin")]
+    [Authorize(Roles = AdminRole)]
     public async Task<IActionResult> CreateRole(CreateRoleDto request)
     {
-        var roleName = request.Name.Trim();
+        var roleName = NormalizeRole(request.Name);
 
         if (string.IsNullOrWhiteSpace(roleName))
         {
@@ -126,7 +153,7 @@ public class AuthController : ControllerBase
     }
 
     [HttpPost("users/{userId}/roles")]
-    [Authorize(Roles = "Admin")]
+    [Authorize(Roles = AdminRole)]
     public async Task<IActionResult> AssignRoleToUser(string userId, AssignRoleDto request)
     {
         var user = await _userManager.FindByIdAsync(userId);
@@ -139,7 +166,7 @@ public class AuthController : ControllerBase
             });
         }
 
-        var roleName = request.Role.Trim();
+        var roleName = NormalizeRole(request.Role);
 
         if (!await _roleManager.RoleExistsAsync(roleName))
         {
@@ -172,11 +199,14 @@ public class AuthController : ControllerBase
         });
     }
 
-    private async Task EnsureRoleExists(string roleName)
+    private async Task EnsureDefaultRolesExist()
     {
-        if (!await _roleManager.RoleExistsAsync(roleName))
+        foreach (var roleName in new[] { AdminRole, ClientRole })
         {
-            await _roleManager.CreateAsync(new IdentityRole(roleName));
+            if (!await _roleManager.RoleExistsAsync(roleName))
+            {
+                await _roleManager.CreateAsync(new IdentityRole(roleName));
+            }
         }
     }
 
@@ -218,5 +248,34 @@ public class AuthController : ControllerBase
         return int.TryParse(_configuration["Jwt:ExpireMinutes"], out var minutes)
             ? minutes
             : 60;
+    }
+
+    private static string NormalizeRole(string role)
+    {
+        return role.Trim().ToUpperInvariant();
+    }
+
+    private static object BuildAuthResponse(
+        string token,
+        DateTime expiresAt,
+        IdentityUser user,
+        IEnumerable<string> roles)
+    {
+        return new
+        {
+            token,
+            expiresAt,
+            user = BuildUserResponse(user, roles)
+        };
+    }
+
+    private static object BuildUserResponse(IdentityUser user, IEnumerable<string> roles)
+    {
+        return new
+        {
+            id = user.Id,
+            email = user.Email,
+            roles = roles.ToArray()
+        };
     }
 }
