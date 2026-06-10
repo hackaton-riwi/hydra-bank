@@ -20,7 +20,15 @@ builder.Services.AddSwaggerGen(options =>
         BearerFormat = "JWT",
         In = ParameterLocation.Header,
         Name = "Authorization",
-        Description = "Escribe tu token JWT"
+        Description = "Pega solo el token JWT, sin escribir Bearer"
+    });
+
+    options.AddSecurityRequirement(openApiDocument => new OpenApiSecurityRequirement
+    {
+        {
+            new OpenApiSecuritySchemeReference("Bearer", openApiDocument),
+            new List<string>()
+        }
     });
 });
     
