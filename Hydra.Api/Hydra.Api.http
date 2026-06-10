@@ -28,16 +28,6 @@ Authorization: Bearer {{token}}
 
 ###
 
-POST {{Hydra.Api_HostAddress}}/api/auth/roles
-Content-Type: application/json
-Authorization: Bearer {{token}}
-
-{
-  "name": "SUPPORT"
-}
-
-###
-
 POST {{Hydra.Api_HostAddress}}/api/auth/users/{{userId}}/roles
 Content-Type: application/json
 Authorization: Bearer {{token}}
