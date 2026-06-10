@@ -20,6 +20,8 @@ Al registrarse, el sistema crea automaticamente:
 
 El registro no inicia sesion automaticamente. Despues de registrarse, el cliente debe llamar `POST /api/v1/auth/login` para obtener su token.
 
+Antes de registrarse, el frontend puede llamar `GET /api/v1/tenants` para mostrar los tenants disponibles. El usuario escoge uno y el frontend envia el `tenantSlug` seleccionado en el registro y el login.
+
 ## Reglas actuales
 
 - Un documento solo puede estar registrado una vez por tenant.
@@ -29,6 +31,27 @@ El registro no inicia sesion automaticamente. Despues de registrarse, el cliente
 - Redis se conserva configurado para cache distribuido, aunque el flujo actual no depende de cache.
 
 ## Endpoints actuales
+
+### Listar tenants disponibles
+
+`GET /api/v1/tenants`
+
+Respuesta relevante:
+
+```json
+{
+  "tenants": [
+    {
+      "id": "00000000-0000-0000-0000-000000000000",
+      "name": "Manhattan Trust Bank",
+      "slug": "manhattan-trust",
+      "mainCurrency": "COP"
+    }
+  ]
+}
+```
+
+Este endpoint es publico para que el cliente pueda escoger a que tenant registrarse. No devuelve correos de administradores ni datos internos sensibles.
 
 ### Registrar cliente y crear cuenta
 

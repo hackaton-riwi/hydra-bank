@@ -65,7 +65,9 @@ public class AuthController : ControllerBase
             return NotFound(Error("TENANT_NOT_FOUND", "Tenant no encontrado"));
         }
 
-        if (await _userManager.FindByEmailAsync(email) is not null ||
+        var identityUserName = BuildTenantIdentityUserName(tenantSlug, email);
+
+        if (await _userManager.FindByNameAsync(identityUserName) is not null ||
             await _dbContext.BankUsers.AnyAsync(x => x.TenantId == tenant.Id && x.Email.ToLower() == email))
         {
             return Conflict(Error("EMAIL_ALREADY_EXISTS", "Ya existe un usuario con ese correo"));
@@ -80,7 +82,7 @@ public class AuthController : ControllerBase
 
         var identityUser = new IdentityUser
         {
-            UserName = email,
+            UserName = identityUserName,
             Email = email,
             EmailConfirmed = true
         };
@@ -167,7 +169,7 @@ public class AuthController : ControllerBase
             return Unauthorized(Error("INVALID_TENANT_CREDENTIALS", "Credenciales inválidas para el tenant"));
         }
 
-        var user = await _userManager.FindByEmailAsync(email);
+        var user = await _userManager.FindByNameAsync(BuildTenantIdentityUserName(tenantSlug, email));
 
         if (user is null || !await _userManager.CheckPasswordAsync(user, request.Password))
         {
@@ -365,16 +367,18 @@ public class AuthController : ControllerBase
 
     private async Task<BankUser?> FindBankUserAsync(IdentityUser user)
     {
-        if (string.IsNullOrWhiteSpace(user.Email))
+        var tenantClaim = User.FindFirst("tenant_id")?.Value;
+        var userClaim = User.FindFirst("user_id")?.Value;
+
+        if (!Guid.TryParse(tenantClaim, out var tenantId) ||
+            !Guid.TryParse(userClaim, out var userId))
         {
             return null;
         }
 
-        var email = user.Email.Trim().ToLower();
-
         return await _dbContext.BankUsers
             .AsNoTracking()
-            .SingleOrDefaultAsync(bankUser => bankUser.Email.ToLower() == email);
+            .SingleOrDefaultAsync(bankUser => bankUser.TenantId == tenantId && bankUser.Id == userId);
     }
 
     private static string NormalizeDocumentNumber(string documentNumber)
@@ -387,6 +391,11 @@ public class AuthController : ControllerBase
     private static string GenerateAccountNumber()
     {
         return DateTime.UtcNow.Ticks.ToString()[^10..];
+    }
+
+    private static string BuildTenantIdentityUserName(string tenantSlug, string email)
+    {
+        return $"{tenantSlug}:{email}";
     }
 
     private static object Error(string code, string description)

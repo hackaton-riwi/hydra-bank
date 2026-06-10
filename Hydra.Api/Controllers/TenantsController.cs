@@ -41,6 +41,32 @@ public class TenantsController : ControllerBase
         _passwordHasher = passwordHasher;
     }
 
+    [HttpGet]
+    [AllowAnonymous]
+    public async Task<IActionResult> List()
+    {
+        var tenants = await _dbContext.Tenants
+            .AsNoTracking()
+            .OrderBy(tenant => tenant.Name)
+            .Select(tenant => new
+            {
+                tenant.Id,
+                tenant.Name,
+                tenant.Slug,
+                tenant.MainCurrency,
+                tenant.MaxTransactionAmount,
+                FeeType = tenant.FeeType.ToString(),
+                tenant.FeeValue,
+                tenant.CreatedAt
+            })
+            .ToListAsync();
+
+        return Ok(new
+        {
+            tenants
+        });
+    }
+
     [HttpPost]
     [AllowAnonymous]
     public async Task<IActionResult> Create(CreateTenantDto request)
@@ -64,15 +90,9 @@ public class TenantsController : ControllerBase
 
         var adminEmail = request.Correo.Trim().ToLowerInvariant();
 
-        if (await _dbContext.BankUsers.AnyAsync(user => user.Email.ToLower() == adminEmail))
-        {
-            return Conflict(new
-            {
-                message = "Ya existe un usuario bancario con ese correo"
-            });
-        }
+        var identityUserName = BuildTenantIdentityUserName(slug, adminEmail);
 
-        if (await _userManager.FindByEmailAsync(adminEmail) is not null)
+        if (await _userManager.FindByNameAsync(identityUserName) is not null)
         {
             return Conflict(new
             {
@@ -117,7 +137,7 @@ public class TenantsController : ControllerBase
 
         var identityAdmin = new IdentityUser
         {
-            UserName = adminEmail,
+            UserName = identityUserName,
             Email = adminEmail,
             EmailConfirmed = true
         };
@@ -188,5 +208,10 @@ public class TenantsController : ControllerBase
     private static string BuildAdminPassword()
     {
         return $"Admin{Guid.NewGuid():N}"[..12] + "a1";
+    }
+
+    private static string BuildTenantIdentityUserName(string tenantSlug, string email)
+    {
+        return $"{tenantSlug}:{email}";
     }
 }

@@ -1,6 +1,11 @@
 @Hydra.Api_HostAddress = http://localhost:5088
 @token = pega_aqui_el_token
 
+GET {{Hydra.Api_HostAddress}}/api/v1/tenants
+Accept: application/json
+
+###
+
 POST {{Hydra.Api_HostAddress}}/api/v1/tenants
 Content-Type: application/json
 
