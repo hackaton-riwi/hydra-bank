@@ -38,4 +38,5 @@ public class AuthController : ControllerBase
             message = "Usuario creado correctamente"
         });
     }
+   
 }
