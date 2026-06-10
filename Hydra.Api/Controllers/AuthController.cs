@@ -116,42 +116,6 @@ public class AuthController : ControllerBase
         });
     }
 
-    [HttpPost("roles")] 
-    [Authorize(Roles = AdminRole)]
-    public async Task<IActionResult> CreateRole(CreateRoleDto request)
-    {
-        var roleName = NormalizeRole(request.Name);
-
-        if (string.IsNullOrWhiteSpace(roleName))
-        {
-            return BadRequest(new
-            {
-                message = "El nombre del rol es obligatorio"
-            });
-        }
-
-        if (await _roleManager.RoleExistsAsync(roleName))
-        {
-            return Conflict(new
-            {
-                message = "El rol ya existe"
-            });
-        }
-
-        var result = await _roleManager.CreateAsync(new IdentityRole(roleName));
-
-        if (!result.Succeeded)
-        {
-            return BadRequest(result.Errors);
-        }
-
-        return Ok(new
-        {
-            message = "Rol creado correctamente",
-            role = roleName
-        });
-    }
-    
     private async Task EnsureDefaultRolesExist()
     {
         foreach (var roleName in new[] { AdminRole, ClientRole })
@@ -201,11 +165,6 @@ public class AuthController : ControllerBase
         return int.TryParse(_configuration["Jwt:ExpireMinutes"], out var minutes)
             ? minutes
             : 60;
-    }
-
-    private static string NormalizeRole(string role)
-    {
-        return role.Trim().ToUpperInvariant();
     }
 
     private static object BuildAuthResponse(
