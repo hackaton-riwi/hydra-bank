@@ -1,55 +1,192 @@
-# Hydra Bank API
+# hydra-bank
 
-API bancaria multi-tenant desarrollada en ASP.NET Core con JWT, Identity, Entity Framework Core y PostgreSQL.
+Academic project repository for Manhattan Trust Bank (ID: 194).
 
-El sistema separa la administración del tenant de la operación bancaria del cliente. Un `ADMIN` configura el tenant y sus tasas, pero la creación y operación de cuentas bancarias pertenece al `CLIENT` autenticado.
+## Arquitectura del Sistema
 
-## Reglas implementadas
-
-- API versionada bajo `/api/v1/...`.
-- Las operaciones financieras mutables requieren `Idempotency-Key` con formato UUID.
-- La creación de cuenta solo la puede hacer un usuario con rol `CLIENT`.
-- El titular de una cuenta se toma del `user_id` del JWT, no del body.
-- Las cuentas tienen número único, titular, saldo, moneda, estado y fecha de creación.
-- La desactivación de cuentas usa soft delete: cambia estado a `INACTIVE` y conserva el registro.
-- No se permiten depósitos, retiros ni transferencias sobre cuentas inactivas o bloqueadas.
-- Depósitos y retiros validan monto positivo, cuenta activa y saldo suficiente cuando aplica.
-- Transferencias internas validan tenant, cuentas activas, saldo suficiente, comisión y conversión multimoneda.
-- Las tasas de cambio son estáticas y configuradas por tenant.
-- El historial de transacciones es paginado y permite filtros por fecha y tipo.
-- Redis se usa como caché distribuida para configuración de tenant y tasas de cambio.
-
-## Redis y caché
-
-Redis está conectado desde [Program.cs](</home/duvan/Documents/carpeta proyecto-hackaton/hydra-bank/Hydra.Api/Program.cs>) con `AddStackExchangeRedisCache`.
-
-Configuración:
-
-- [Hydra.Api/appsettings.json](</home/duvan/Documents/carpeta proyecto-hackaton/hydra-bank/Hydra.Api/appsettings.json>): `ConnectionStrings:Redis`.
-- [Hydra.Api/appsettings.Development.json](</home/duvan/Documents/carpeta proyecto-hackaton/hydra-bank/Hydra.Api/appsettings.Development.json>): `ConnectionStrings:Redis`.
-- Si la cadena `Redis` está vacía, la API usa `AddDistributedMemoryCache` como fallback local.
-
-Levantar Redis local:
-
-```bash
-docker compose up -d redis
+```
+┌─────────────────────────────────────────────────────────────────┐
+│                    HYDRA.API (Presentación)                      │
+│  ┌──────────────────┐         ┌──────────────────────────────┐   │
+│  │ AuthController   │         │  TenantsController           │   │
+│  │ - Register       │         │  - Create Tenant             │   │
+│  │ - Login          │         │  - Get Tenants (admin only)  │   │
+│  └──────────────────┘         └──────────────────────────────┘   │
+└────────────────┬─────────────────────────────────────────────────┘
+                 │
+                 │ Swagger/OpenAPI, JWT Authentication
+                 │
+┌────────────────┴─────────────────────────────────────────────────┐
+│            HYDRA.APPLICATION (Aplicación)                        │
+│  ┌─────────────────────────────────────────────────────────┐    │
+│  │ DTOs                                                     │    │
+│  │ - RegisterDto, LoginDto                                 │    │
+│  │ - CreateTenantDto, AssignRoleDto                        │    │
+│  └─────────────────────────────────────────────────────────┘    │
+└────────────────┬─────────────────────────────────────────────────┘
+                 │
+┌────────────────┴─────────────────────────────────────────────────┐
+│              HYDRA.DOMAIN (Lógica de Negocio)                    │
+│  Entities:                                                        │
+│  - Tenant: Configuración y datos del cliente                     │
+│  - User: Usuarios dentro de un tenant (Admin/Client)             │
+│  - Account: Cuentas bancarias (Balance, Currency)                │
+│  - Transaction: Operaciones (Deposit, Withdraw, Transfer)        │
+│  - ExchangeRate: Tasas de cambio por tenant                      │
+│  - AuditLog: Registro de cambios (JSONB)                         │
+│  - IdempotencyRecord: Prevenir duplicados en transacciones       │
+│                                                                   │
+│  Enums:                                                          │
+│  - UserRole: ADMIN, CLIENT                                       │
+│  - AccountStatus: ACTIVE, INACTIVE, BLOCKED                      │
+│  - TransactionType: DEPOSIT, WITHDRAW, TRANSFER                  │
+│  - TransactionStatus: PENDING, SUCCESS, FAILED                   │
+│  - FeeTypeEnum: FIXED, PERCENTAGE                                │
+└────────────────┬─────────────────────────────────────────────────┘
+                 │
+┌────────────────┴─────────────────────────────────────────────────┐
+│         HYDRA.INFRASTRUCTURE (Persistencia)                      │
+│  ┌──────────────────────────────────────────────────────────┐    │
+│  │ BankOsDbContext (Entity Framework Core)                  │    │
+│  │ - DbSet para todas las entidades                         │    │
+│  │ - Configuración de constraints (PK, FK, UK)             │    │
+│  │ - Indices para performance                              │    │
+│  │ - PostgreSQL Enums personalizados                        │    │
+│  └──────────────────────────────────────────────────────────┘    │
+│  ┌──────────────────────────────────────────────────────────┐    │
+│  │ Identity (ASP.NET Core Identity)                         │    │
+│  │ - UserManager, RoleManager                              │    │
+│  │ - JWT Token Generation                                  │    │
+│  │ - Roles: ADMIN, CLIENT                                  │    │
+│  └──────────────────────────────────────────────────────────┘    │
+│  ┌──────────────────────────────────────────────────────────┐    │
+│  │ DependencyInjection                                      │    │
+│  │ - Configuración de servicios                            │    │
+│  │ - Mapeo de enums PostgreSQL                             │    │
+│  └──────────────────────────────────────────────────────────┘    │
+└────────────────┬─────────────────────────────────────────────────┘
+                 │
+┌────────────────┴─────────────────────────────────────────────────┐
+│              PostgreSQL Database                                  │
+│  Tablas:                                                          │
+│  - AspNetUsers (Identity)                                        │
+│  - AspNetRoles (Identity)                                        │
+│  - tenants, accounts, transactions                               │
+│  - exchange_rates, audit_logs, idempotency_records               │
+└─────────────────────────────────────────────────────────────────┘
 ```
 
-Uso actual del caché:
+### Flujo de Multi-Tenancy
 
-- [BankCacheKeys.cs](</home/duvan/Documents/carpeta proyecto-hackaton/hydra-bank/Hydra.Application/Caching/BankCacheKeys.cs>) centraliza las llaves.
-- [AccountService.cs](</home/duvan/Documents/carpeta proyecto-hackaton/hydra-bank/Hydra.Application/Services/AccountService.cs>) cachea configuración de tenant con TTL de 10 minutos.
-- [AccountService.cs](</home/duvan/Documents/carpeta proyecto-hackaton/hydra-bank/Hydra.Application/Services/AccountService.cs>) cachea tasas `tenant + moneda origen + moneda destino` con TTL de 30 minutos.
-- [ExchangeRatesController.cs](</home/duvan/Documents/carpeta proyecto-hackaton/hydra-bank/Hydra.Api/Controllers/ExchangeRatesController.cs>) invalida la tasa cacheada cuando el `ADMIN` guarda o actualiza una tasa.
+1. **Registro**: Primer usuario → ADMIN, siguientes → CLIENT
+2. **Creación de Tenant**: Solo ADMIN puede crear tenants
+3. **Aislamiento**: Cada tenant tiene sus datos separados (constraints FK a tenant_id)
+4. **Operaciones**: Dentro de cada tenant, usuarios pueden crear cuentas y hacer transacciones
 
-Llaves usadas:
+### Características Clave
 
-```text
-HydraBank:bankos:tenant:{tenantId}:config
-HydraBank:bankos:tenant:{tenantId}:exchange:{fromCurrency}:{toCurrency}
+- **JWT Authentication**: Tokens seguros con configuración HMAC-256
+- **Multi-Tenancy**: Arquitectura de base de datos compartida con aislamiento de datos
+- **Auditoría**: AuditLog con valores old/new en JSONB
+- **Idempotencia**: Prevención de transacciones duplicadas
+- **Enums PostgreSQL**: Validación de datos a nivel de BD
+- **Validaciones**: Constraints de BD (balance >= 0, currencies válidas, etc)
+
+## Estructura del Repositorio
+
+```
+hydra-bank/
+├── .git/                          # Control de versiones
+├── .gitignore                     # Archivos ignorados
+├── Directory.Build.props          # Propiedades globales del proyecto
+├── Hydra.slnx                     # Solución Visual Studio
+├── README.md                      # Este archivo
+│
+├── Hydra.Api/                     # CAPA DE PRESENTACIÓN (API REST)
+│   ├── Program.cs                 # Configuración de la aplicación (Startup)
+│   ├── Hydra.Api.csproj          # Proyecto C#
+│   ├── Hydra.Api.http            # Archivo de pruebas HTTP (REST Client)
+│   ├── appsettings.json          # Configuración producción
+│   ├── appsettings.Development.json  # Configuración desarrollo
+│   │
+│   ├── Controllers/
+│   │   ├── AuthController.cs      # Endpoints: Register, Login, GenerateToken
+│   │   └── TenantsController.cs   # Endpoints: CreateTenant
+│   │
+│   ├── Middlewares/               # Middlewares personalizados (vacío actualmente)
+│   │
+│   └── Properties/
+│       └── launchSettings.json    # Configuración de lanzamiento
+│
+├── Hydra.Application/             # CAPA DE APLICACIÓN (Modelos de Datos)
+│   ├── Hydra.Application.csproj
+│   │
+│   └── DTOs/                      # Data Transfer Objects
+│       ├── RegisterDto.cs         # Modelo para registro de usuarios
+│       ├── LoginDto.cs            # Modelo para login
+│       ├── CreateTenantDto.cs     # Modelo para crear tenant
+│       ├── CreateRoleDto.cs       # Modelo para crear roles
+│       └── AssignRoleDto.cs       # Modelo para asignar roles
+│
+├── Hydra.Domain/                  # CAPA DE DOMINIO (Lógica de Negocio)
+│   ├── Hydra.Domain.csproj
+│   │
+│   ├── Entities/                  # Entidades del dominio
+│   │   ├── Tenant.cs              # Información del cliente/banco
+│   │   ├── User.cs                # Usuarios por tenant
+│   │   ├── Account.cs             # Cuentas bancarias
+│   │   ├── Transaction.cs         # Transacciones (depósitos, retiros, transferencias)
+│   │   ├── ExchangeRate.cs        # Tasas de cambio
+│   │   ├── AuditLog.cs            # Registro de auditoría
+│   │   └── IdempotencyRecord.cs   # Registros de idempotencia
+│   │
+│   └── Enums/                     # Enumeraciones
+│       ├── UserRole.cs            # ADMIN, CLIENT
+│       ├── AccountStatus.cs       # ACTIVE, INACTIVE, BLOCKED
+│       ├── TransactionType.cs     # DEPOSIT, WITHDRAW, TRANSFER
+│       ├── TransactionStatus.cs   # PENDING, SUCCESS, FAILED
+│       ├── FeeTypeEnum.cs         # FIXED, PERCENTAGE
+│       └── IdempotencyState.cs    # PROCESSING, COMPLETED
+│
+├── Hydra.Infrastructure/          # CAPA DE INFRAESTRUCTURA (Persistencia)
+│   ├── Hydra.Infrastructure.csproj
+│   │
+│   ├── DATA/
+│   │   ├── BankOsDbContext.cs     # DbContext (EF Core)
+│   │   │                          # - Configuración de todas las entidades
+│   │   │                          # - Constraints de base de datos
+│   │   │                          # - Índices
+│   │   │                          # - Relaciones
+│   │   │
+│   │   ├── DependencyInjection.cs # Configuración de servicios
+│   │   │                          # - AddDbContext
+│   │   │                          # - AddIdentity
+│   │   │                          # - Mapeo de enums PostgreSQL
+│   │   │
+│   │   └── Migrations/            # Migraciones de base de datos
+│   │       ├── 20260610014410_InitialCreate.*
+│   │       ├── 20260610014734_InitialIdentity.*
+│   │       ├── 20260610015447_secondMigrations.*
+│   │       └── BankOsDbContextModelSnapshot.cs
+│   │
+│   └── DOC/                       # Documentación
+│       ├── Doc Dbhydra.md         # Documentación de la BD
+│       ├── InitialCreate.sql      # Script SQL inicial
+│       └── script.sql             # Scripts adicionales
+│
+└── [build folders]
+    ├── bin/                       # Binarios compilados
+    └── obj/                       # Objetos compilados
 ```
 
-La base de datos sigue siendo la fuente de verdad. Redis solo evita consultas repetidas en operaciones financieras.
+### Explicación de Carpetas
+
+| Carpeta | Propósito |
+|---------|-----------|
+| **Hydra.Api** | REST API con JWT, Swagger, controladores |
+| **Hydra.Application** | DTOs para comunicación entre capas |
+| **Hydra.Domain** | Entidades de negocio e interfaces de repositorio |
+| **Hydra.Infrastructure** | EF Core, migraciones, Identity, inyección de dependencias |
 
 ## Idempotencia
 
