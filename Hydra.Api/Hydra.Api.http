@@ -1,6 +1,49 @@
-@Hydra.Api_HostAddress = http://localhost:5139
+@Hydra.Api_HostAddress = http://localhost:5088
+@token = pega_aqui_el_token
+@userId = pega_aqui_el_user_id
 
-GET {{Hydra.Api_HostAddress}}/weatherforecast/
+POST {{Hydra.Api_HostAddress}}/api/auth/register
+Content-Type: application/json
+
+{
+  "email": "admin@hydra.local",
+  "password": "Password1"
+}
+
+###
+
+POST {{Hydra.Api_HostAddress}}/api/auth/login
+Content-Type: application/json
+
+{
+  "email": "admin@hydra.local",
+  "password": "Password1"
+}
+
+###
+
+GET {{Hydra.Api_HostAddress}}/api/auth/me
 Accept: application/json
+Authorization: Bearer {{token}}
+
+###
+
+POST {{Hydra.Api_HostAddress}}/api/auth/roles
+Content-Type: application/json
+Authorization: Bearer {{token}}
+
+{
+  "name": "SUPPORT"
+}
+
+###
+
+POST {{Hydra.Api_HostAddress}}/api/auth/users/{{userId}}/roles
+Content-Type: application/json
+Authorization: Bearer {{token}}
+
+{
+  "role": "CLIENT"
+}
 
 ###

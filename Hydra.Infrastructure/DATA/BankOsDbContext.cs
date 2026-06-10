@@ -1,12 +1,13 @@
 ﻿using System;
 using System.Collections.Generic;
 using Hydra.Domain.Enums;
-using Hydra.Infrastructure.Entidades;
+using Hydra.Domain.Entities;
+using Microsoft.AspNetCore.Identity.EntityFrameworkCore;
 using Microsoft.EntityFrameworkCore;
 
-namespace Hydra.Infrastructure.Data;
+namespace Hydra.Infrastructure.DATA;
 
-public partial class BankOsDbContext : DbContext
+public partial class BankOsDbContext : IdentityDbContext
 {
     public BankOsDbContext(DbContextOptions<BankOsDbContext> options)
         : base(options)
@@ -25,10 +26,12 @@ public partial class BankOsDbContext : DbContext
 
     public virtual DbSet<Transaction> Transactions { get; set; }
 
-    public virtual DbSet<User> Users { get; set; }
+    public virtual DbSet<User> BankUsers { get; set; }
 
     protected override void OnModelCreating(ModelBuilder modelBuilder)
     {
+        base.OnModelCreating(modelBuilder);
+
         modelBuilder
             .HasPostgresEnum("account_status", new[] { "ACTIVE", "INACTIVE", "BLOCKED" })
             .HasPostgresEnum("fee_type_enum", new[] { "FIXED", "PERCENTAGE" })
@@ -42,6 +45,11 @@ public partial class BankOsDbContext : DbContext
             entity.HasKey(e => e.Id).HasName("accounts_pkey");
 
             entity.ToTable("accounts");
+            entity.ToTable(t =>
+            {
+                t.HasCheckConstraint("chk_account_balance_positive", "balance >= 0");
+                t.HasCheckConstraint("chk_account_currency", "currency ~ '^[A-Z]{3}$'");
+            });
 
             entity.HasIndex(e => new { e.TenantId, e.AccountNumber }, "idx_accounts_tenant_account_number").IsUnique();
 
@@ -67,7 +75,7 @@ public partial class BankOsDbContext : DbContext
             entity.Property(e => e.DeactivatedAt).HasColumnName("deactivated_at");
             entity.Property(e => e.OwnerId).HasColumnName("owner_id");
             entity.Property(e => e.Status)
-                .HasDefaultValue(AccountStatus.ACTIVE)
+                .HasDefaultValueSql("'ACTIVE'::account_status")
                 .HasColumnName("status")
                 .HasColumnType("account_status");
             entity.Property(e => e.TenantId).HasColumnName("tenant_id");
@@ -120,6 +128,13 @@ public partial class BankOsDbContext : DbContext
             entity.HasKey(e => e.Id).HasName("exchange_rates_pkey");
 
             entity.ToTable("exchange_rates");
+            entity.ToTable(t =>
+            {
+                t.HasCheckConstraint("chk_er_from", "from_currency ~ '^[A-Z]{3}$'");
+                t.HasCheckConstraint("chk_er_to", "to_currency ~ '^[A-Z]{3}$'");
+                t.HasCheckConstraint("chk_exchange_different_currency", "from_currency <> to_currency");
+                t.HasCheckConstraint("chk_exchange_rate_positive", "rate > 0");
+            });
 
             entity.HasIndex(e => new { e.TenantId, e.FromCurrency, e.ToCurrency }, "idx_exchange_rates_tenant_pair").IsUnique();
 
@@ -151,6 +166,10 @@ public partial class BankOsDbContext : DbContext
             entity.HasKey(e => e.Id).HasName("idempotency_records_pkey");
 
             entity.ToTable("idempotency_records");
+            entity.ToTable(t =>
+            {
+                t.HasCheckConstraint("chk_idempotency_expiration", "expires_at > created_at");
+            });
 
             entity.HasIndex(e => new { e.TenantId, e.UserId, e.IdempotencyKey }, "idempotency_records_tenant_id_user_id_idempotency_key_key").IsUnique();
 
@@ -171,7 +190,7 @@ public partial class BankOsDbContext : DbContext
                 .HasColumnType("jsonb")
                 .HasColumnName("response_body");
             entity.Property(e => e.State)
-                .HasDefaultValue(IdempotencyState.PROCESSING)
+                .HasDefaultValueSql("'PROCESSING'::idempotency_state")
                 .HasColumnName("state")
                 .HasColumnType("idempotency_state");
             entity.Property(e => e.StatusCode).HasColumnName("status_code");
@@ -190,6 +209,13 @@ public partial class BankOsDbContext : DbContext
             entity.HasKey(e => e.Id).HasName("tenants_pkey");
 
             entity.ToTable("tenants");
+            entity.ToTable(t =>
+            {
+                t.HasCheckConstraint("chk_fee_value", "fee_value >= 0");
+                t.HasCheckConstraint("chk_max_amount", "max_transaction_amount > 0");
+                t.HasCheckConstraint("chk_percentage_limit", "fee_type <> 'PERCENTAGE' OR fee_value <= 100");
+                t.HasCheckConstraint("chk_tenant_main_currency", "main_currency ~ '^[A-Z]{3}$'");
+            });
 
             entity.HasIndex(e => e.Slug, "tenants_slug_key").IsUnique();
 
@@ -239,6 +265,20 @@ public partial class BankOsDbContext : DbContext
 
             entity.HasIndex(e => new { e.TenantId, e.Id }, "uq_transactions_tenant_id_id").IsUnique();
 
+            entity.HasIndex(e => e.Type, "idx_transactions_type");
+
+            entity.ToTable(t =>
+            {
+                t.HasCheckConstraint("chk_trans_converted_amount_positive", "converted_amount IS NULL OR converted_amount > 0");
+                t.HasCheckConstraint("chk_trans_fee_positive", "fee_amount >= 0");
+                t.HasCheckConstraint("chk_trans_original_amount_positive", "original_amount > 0");
+                t.HasCheckConstraint("chk_transaction_account_shape", """
+                    (type = 'DEPOSIT' AND source_account_id IS NULL AND destination_account_id IS NOT NULL)
+                    OR (type = 'WITHDRAW' AND source_account_id IS NOT NULL AND destination_account_id IS NULL)
+                    OR (type = 'TRANSFER' AND source_account_id IS NOT NULL AND destination_account_id IS NOT NULL AND source_account_id <> destination_account_id)
+                    """);
+            });
+
             entity.Property(e => e.Id)
                 .ValueGeneratedNever()
                 .HasColumnName("id");
@@ -263,7 +303,7 @@ public partial class BankOsDbContext : DbContext
                 .HasColumnName("original_amount");
             entity.Property(e => e.SourceAccountId).HasColumnName("source_account_id");
             entity.Property(e => e.Status)
-                .HasDefaultValue(TransactionStatus.PENDING)
+                .HasDefaultValueSql("'PENDING'::transaction_status")
                 .HasColumnName("status")
                 .HasColumnType("transaction_status");
             entity.Property(e => e.TenantId).HasColumnName("tenant_id");

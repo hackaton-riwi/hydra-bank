@@ -1,4 +1,5 @@
 using Microsoft.AspNetCore.Authentication.JwtBearer;
+using Microsoft.AspNetCore.Identity;
 using Microsoft.IdentityModel.Tokens;
 using Microsoft.OpenApi;
 using System.Security.Claims;
@@ -19,11 +20,25 @@ builder.Services.AddSwaggerGen(options =>
         BearerFormat = "JWT",
         In = ParameterLocation.Header,
         Name = "Authorization",
-        Description = "Escribe tu token JWT"
+        Description = "Pega solo el token JWT, sin escribir Bearer"
+    });
+
+    options.AddSecurityRequirement(openApiDocument => new OpenApiSecurityRequirement
+    {
+        {
+            new OpenApiSecuritySchemeReference("Bearer", openApiDocument),
+            new List<string>()
+        }
     });
 });
     
-var jwtKey = builder.Configuration["Jwt:Key"];
+var jwtKey = builder.Configuration["Jwt:Key"]
+    ?? throw new InvalidOperationException("Jwt:Key no está configurado");
+
+if (Encoding.UTF8.GetByteCount(jwtKey) < 32)
+{
+    throw new InvalidOperationException("Jwt:Key debe tener mínimo 32 caracteres para HmacSha256");
+}
 
 builder.Services.AddAuthentication(options =>
     {
@@ -52,6 +67,8 @@ builder.Services.AddInfrastructure(builder.Configuration);
 
 var app = builder.Build();
 
+await SeedIdentityRolesAsync(app);
+
 if (app.Environment.IsDevelopment())
 {
     app.UseSwagger();
@@ -66,3 +83,17 @@ app.UseAuthorization();
 app.MapControllers();
 
 app.Run();
+
+static async Task SeedIdentityRolesAsync(WebApplication app)
+{
+    using var scope = app.Services.CreateScope();
+    var roleManager = scope.ServiceProvider.GetRequiredService<RoleManager<IdentityRole>>();
+
+    foreach (var roleName in new[] { "ADMIN", "CLIENT" })
+    {
+        if (!await roleManager.RoleExistsAsync(roleName))
+        {
+            await roleManager.CreateAsync(new IdentityRole(roleName));
+        }
+    }
+}
