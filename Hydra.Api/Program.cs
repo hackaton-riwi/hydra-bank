@@ -17,15 +17,21 @@ using BankUser = Hydra.Domain.Entities.User;
 using System.Threading.RateLimiting;
 
 var builder = WebApplication.CreateBuilder(args);
-builder.Services.AddCors(options =>
-{
-    options.AddPolicy("AllowAll", policy =>
-        policy.AllowAnyOrigin()
-            .AllowAnyMethod()
-            .AllowAnyHeader());
-});
+
+// 1. Nombre de política limpio y seguro
+const string CorsPolicyName = "AllowAll";
 
 builder.Services.AddControllers();
+
+// 2. Un solo bloque de configuración de CORS
+builder.Services.AddCors(options =>
+{
+    options.AddPolicy(CorsPolicyName, policy =>
+        policy
+            .AllowAnyOrigin()
+            .AllowAnyHeader()
+            .AllowAnyMethod());
+});
 
 builder.Services.AddEndpointsApiExplorer();
 builder.Services.AddSwaggerGen(options =>
@@ -97,6 +103,7 @@ builder.Services.AddAuthentication(options =>
         };
     });
 builder.Services.AddAuthorization();
+
 builder.Services.AddRateLimiter(options =>
 {
     options.RejectionStatusCode = StatusCodes.Status429TooManyRequests;
@@ -151,23 +158,31 @@ var app = builder.Build();
 await SeedIdentityRolesAsync(app);
 await SeedSuperAdminAsync(app);
 
-app.UseCors("AllowAll");
+var swaggerEnabled = app.Environment.IsDevelopment()
+    || app.Configuration.GetValue<bool>("Swagger:Enabled");
 
-if (app.Environment.IsDevelopment())
+if (swaggerEnabled)
 {
     app.UseSwagger();
     app.UseSwaggerUI();
 }
 
 app.UseHttpsRedirection();
+app.UseRouting();
+
+// 3. ORDEN DE MIDDLEWARES CORREGIDO:
+// CORS va de primero para responder las peticiones OPTIONS previas del navegador.
+app.UseCors(CorsPolicyName);
 
 app.UseCors();
 
 app.UseRateLimiter();
+
 app.UseAuthentication();
 app.UseAuthorization();
 
-app.MapControllers();
+// Forzamos que los controladores requieran la política global de CORS
+app.MapControllers().RequireCors(CorsPolicyName);
 
 app.Run();
 

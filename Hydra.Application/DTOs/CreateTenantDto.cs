@@ -12,4 +12,8 @@ public class CreateTenantDto
     [EmailAddress]
     [MaxLength(150)]
     public string Correo { get; set; } = string.Empty;
+
+    [Required]
+    [MinLength(6)]
+    public string Password { get; set; } = string.Empty;
 }
