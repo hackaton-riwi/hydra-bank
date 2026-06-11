@@ -1,4 +1,5 @@
 using System.ComponentModel.DataAnnotations;
+using System.Text.Json.Serialization;
 
 namespace Hydra.Application.DTOs;
 
@@ -8,10 +9,10 @@ namespace Hydra.Application.DTOs;
 public class DepositRequestDto
 {
     /// <summary>
-    /// The destination account ID (to which funds are deposited)
+    /// The destination account ID or short ID, for example ACC-1234ABCD
     /// </summary>
     [Required]
-    public Guid DestinationAccountId { get; set; }
+    public string DestinationAccountId { get; set; } = string.Empty;
 
     /// <summary>
     /// The amount to deposit
@@ -26,10 +27,17 @@ public class DepositRequestDto
 /// </summary>
 public class DepositResponseDto
 {
-    /// <summary>
-    /// The transaction ID
-    /// </>
+    public string Id => TransactionShortId;
+
+    [JsonIgnore]
     public Guid TransactionId { get; set; }
+
+    public string TransactionShortId { get; set; } = string.Empty;
+
+    public string DestinationAccountShortId { get; set; } = string.Empty;
+
+    [JsonIgnore]
+    public Guid DestinationAccountInternalId { get; set; }
 
     /// <summary>
     /// The status of the transaction
@@ -45,6 +53,10 @@ public class DepositResponseDto
     /// The fee amount applied
     /// </summary>
     public decimal FeeAmount { get; set; }
+
+    public decimal NetAmount { get; set; }
+
+    public decimal DestinationBalance { get; set; }
 
     /// <summary>
     /// The timestamp when the transaction was created

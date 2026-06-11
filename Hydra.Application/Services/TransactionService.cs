@@ -14,11 +14,13 @@ public class TransactionService : ITransactionService
 {
     private readonly BankOsDbContext _db;
     private readonly IIdempotencyService _idempotency;
+    private readonly IWebhookNotifier _webhook;
 
-    public TransactionService(BankOsDbContext db, IIdempotencyService idempotency)
+    public TransactionService(BankOsDbContext db, IIdempotencyService idempotency, IWebhookNotifier webhook)
     {
         _db = db;
         _idempotency = idempotency;
+        _webhook = webhook;
     }
 
     public async Task<TransferResponseDto> TransferAsync(
@@ -153,9 +155,12 @@ public class TransactionService : ITransactionService
             var response = new TransferResponseDto
             {
                 TransactionId = transaction.Id,
+                TransactionShortId = BuildShortId("TRX", transaction.Id),
                 Status = transaction.Status.ToString(),
                 SourceAccountId = source.Id,
+                SourceAccountShortId = BuildShortId("ACC", source.Id),
                 DestinationAccountId = destination.Id,
+                DestinationAccountShortId = BuildShortId("ACC", destination.Id),
                 DestinationDocumentNumber = destination.User.DocumentNumber,
                 Amount = request.Amount,
                 FeeAmount = fee,
@@ -165,6 +170,329 @@ public class TransactionService : ITransactionService
             };
 
             await _idempotency.CompleteAsync(tenantId, userId, idempotencyKey, response);
+
+            // Fire-and-forget webhook notification
+            var tenantEntity = await _db.Tenants
+                .AsNoTracking()
+                .SingleOrDefaultAsync(x => x.Id == tenantId);
+            
+            if (tenantEntity?.WebhookUrl != null)
+            {
+                var webhookPayload = new WebhookTransactionPayload
+                {
+                    TransactionId = transaction.Id,
+                    TenantId = tenantId,
+                    UserId = userId,
+                    TransactionType = "TRANSFER",
+                    Amount = request.Amount,
+                    FeeAmount = fee,
+                    Status = "SUCCESS",
+                    CreatedAt = now,
+                    SourceAccountId = source.Id,
+                    DestinationAccountId = destination.Id,
+                    CorrelationId = correlationId
+                };
+                await _webhook.NotifyAsync(tenantEntity.WebhookUrl, webhookPayload);
+            }
+
+            return response;
+        }
+        catch
+        {
+            if (!committed)
+                await dbTransaction.RollbackAsync();
+
+            await _idempotency.FailAsync(tenantId, userId, idempotencyKey);
+            throw;
+        }
+    }
+
+    public async Task<DepositResponseDto> DepositAsync(
+        Guid tenantId,
+        Guid userId,
+        DepositRequestDto request,
+        string idempotencyKey,
+        string correlationId)
+    {
+        var acquired = await _idempotency.StartProcessingAsync(tenantId, userId, idempotencyKey);
+        if (!acquired)
+        {
+            var cached = await _idempotency.GetAsync(tenantId, userId, idempotencyKey);
+            if (cached is not null)
+            {
+                return JsonSerializer.Deserialize<DepositResponseDto>(
+                    JsonSerializer.Serialize(cached.ResponseBody))!;
+            }
+
+            throw new TransactionInProgressException(idempotencyKey);
+        }
+
+        await using var dbTransaction = await _db.Database.BeginTransactionAsync(IsolationLevel.Serializable);
+        var committed = false;
+
+        try
+        {
+            if (request.Amount <= 0)
+                throw new InvalidOperationException("El monto debe ser mayor que cero");
+
+            var tenant = await _db.Tenants
+                .SingleOrDefaultAsync(x => x.Id == tenantId)
+                ?? throw new InvalidOperationException("Tenant no encontrado");
+
+            if (request.Amount > tenant.MaxTransactionAmount)
+                throw new InvalidOperationException($"El monto excede el maximo permitido de {tenant.MaxTransactionAmount}");
+
+            var destinationAccountId = await ResolveAccountIdAsync(tenantId, request.DestinationAccountId);
+            var account = await _db.Accounts
+                .SingleOrDefaultAsync(x =>
+                    x.TenantId == tenantId &&
+                    x.Id == destinationAccountId)
+                ?? throw new InvalidOperationException("Cuenta destino no encontrada");
+
+            if (account.Status != AccountStatus.ACTIVE)
+                throw new InvalidOperationException("Cuenta destino no esta activa");
+
+            var fee = RoundMoney(CalculateFee(tenant, request.Amount));
+            var netAmount = RoundMoney(request.Amount - fee);
+
+            if (netAmount <= 0)
+                throw new InvalidOperationException("El monto neto despues de comision debe ser mayor que cero");
+
+            var now = DateTime.UtcNow;
+
+            account.Balance = RoundMoney(account.Balance + netAmount);
+            account.UpdatedAt = now;
+
+            var transaction = new Transaction
+            {
+                Id = Guid.NewGuid(),
+                TenantId = tenantId,
+                UserId = userId,
+                Type = TransactionType.DEPOSIT,
+                SourceAccountId = null,
+                DestinationAccountId = account.Id,
+                OriginalAmount = RoundMoney(request.Amount),
+                FeeAmount = fee,
+                Status = TransactionStatus.SUCCESS,
+                CorrelationId = Guid.Parse(correlationId),
+                CreatedAt = now
+            };
+
+            var audit = new AuditLog
+            {
+                Id = Guid.NewGuid(),
+                TenantId = tenantId,
+                UserId = userId,
+                Action = "DEPOSIT",
+                OldValue = JsonSerializer.Serialize(new
+                {
+                    DestinationAccountId = account.Id,
+                    PreviousBalance = account.Balance - netAmount
+                }),
+                NewValue = JsonSerializer.Serialize(new
+                {
+                    DestinationAccountId = account.Id,
+                    Balance = account.Balance,
+                    Amount = request.Amount,
+                    Fee = fee,
+                    NetAmount = netAmount
+                }),
+                CreatedAt = now
+            };
+
+            _db.Transactions.Add(transaction);
+            _db.AuditLogs.Add(audit);
+            await _db.SaveChangesAsync();
+            await dbTransaction.CommitAsync();
+            committed = true;
+
+            var response = new DepositResponseDto
+            {
+                TransactionId = transaction.Id,
+                TransactionShortId = BuildShortId("TRX", transaction.Id),
+                Status = transaction.Status.ToString(),
+                DestinationAccountShortId = BuildShortId("ACC", account.Id),
+                DestinationAccountInternalId = account.Id,
+                OriginalAmount = request.Amount,
+                FeeAmount = fee,
+                NetAmount = netAmount,
+                DestinationBalance = account.Balance,
+                CreatedAt = now
+            };
+
+            await _idempotency.CompleteAsync(tenantId, userId, idempotencyKey, response);
+
+            var tenantEntity = await _db.Tenants
+                .AsNoTracking()
+                .SingleOrDefaultAsync(x => x.Id == tenantId);
+
+            if (tenantEntity?.WebhookUrl != null)
+            {
+                var webhookPayload = new WebhookTransactionPayload
+                {
+                    TransactionId = transaction.Id,
+                    TenantId = tenantId,
+                    UserId = userId,
+                    TransactionType = "DEPOSIT",
+                    Amount = request.Amount,
+                    FeeAmount = fee,
+                    Status = "SUCCESS",
+                    CreatedAt = now,
+                    DestinationAccountId = account.Id,
+                    CorrelationId = correlationId
+                };
+                await _webhook.NotifyAsync(tenantEntity.WebhookUrl, webhookPayload);
+            }
+
+            return response;
+        }
+        catch
+        {
+            if (!committed)
+                await dbTransaction.RollbackAsync();
+
+            await _idempotency.FailAsync(tenantId, userId, idempotencyKey);
+            throw;
+        }
+    }
+
+    public async Task<WithdrawResponseDto> WithdrawAsync(
+        Guid tenantId,
+        Guid userId,
+        WithdrawRequestDto request,
+        string idempotencyKey,
+        string correlationId)
+    {
+        var acquired = await _idempotency.StartProcessingAsync(tenantId, userId, idempotencyKey);
+        if (!acquired)
+        {
+            var cached = await _idempotency.GetAsync(tenantId, userId, idempotencyKey);
+            if (cached is not null)
+            {
+                return JsonSerializer.Deserialize<WithdrawResponseDto>(
+                    JsonSerializer.Serialize(cached.ResponseBody))!;
+            }
+
+            throw new TransactionInProgressException(idempotencyKey);
+        }
+
+        await using var dbTransaction = await _db.Database.BeginTransactionAsync(IsolationLevel.Serializable);
+        var committed = false;
+
+        try
+        {
+            if (request.Amount <= 0)
+                throw new InvalidOperationException("El monto debe ser mayor que cero");
+
+            var tenant = await _db.Tenants
+                .SingleOrDefaultAsync(x => x.Id == tenantId)
+                ?? throw new InvalidOperationException("Tenant no encontrado");
+
+            if (request.Amount > tenant.MaxTransactionAmount)
+                throw new InvalidOperationException($"El monto excede el maximo permitido de {tenant.MaxTransactionAmount}");
+
+            var sourceAccountId = await ResolveAccountIdAsync(tenantId, request.SourceAccountId);
+            var account = await _db.Accounts
+                .SingleOrDefaultAsync(x =>
+                    x.TenantId == tenantId &&
+                    x.Id == sourceAccountId &&
+                    x.OwnerId == userId)
+                ?? throw new InvalidOperationException("Cuenta origen no encontrada");
+
+            if (account.Status != AccountStatus.ACTIVE)
+                throw new InvalidOperationException("Cuenta origen no esta activa");
+
+            var fee = RoundMoney(CalculateFee(tenant, request.Amount));
+            var totalDebit = RoundMoney(request.Amount + fee);
+
+            if (account.Balance < totalDebit)
+                throw new InvalidOperationException("Saldo insuficiente");
+
+            var now = DateTime.UtcNow;
+
+            account.Balance = RoundMoney(account.Balance - totalDebit);
+            account.UpdatedAt = now;
+
+            var transaction = new Transaction
+            {
+                Id = Guid.NewGuid(),
+                TenantId = tenantId,
+                UserId = userId,
+                Type = TransactionType.WITHDRAW,
+                SourceAccountId = account.Id,
+                DestinationAccountId = null,
+                OriginalAmount = RoundMoney(request.Amount),
+                FeeAmount = fee,
+                Status = TransactionStatus.SUCCESS,
+                CorrelationId = Guid.Parse(correlationId),
+                CreatedAt = now
+            };
+
+            var audit = new AuditLog
+            {
+                Id = Guid.NewGuid(),
+                TenantId = tenantId,
+                UserId = userId,
+                Action = "WITHDRAW",
+                OldValue = JsonSerializer.Serialize(new
+                {
+                    SourceAccountId = account.Id,
+                    PreviousBalance = account.Balance + totalDebit
+                }),
+                NewValue = JsonSerializer.Serialize(new
+                {
+                    SourceAccountId = account.Id,
+                    Balance = account.Balance,
+                    Amount = request.Amount,
+                    Fee = fee,
+                    TotalDebit = totalDebit
+                }),
+                CreatedAt = now
+            };
+
+            _db.Transactions.Add(transaction);
+            _db.AuditLogs.Add(audit);
+            await _db.SaveChangesAsync();
+            await dbTransaction.CommitAsync();
+            committed = true;
+
+            var response = new WithdrawResponseDto
+            {
+                TransactionId = transaction.Id,
+                TransactionShortId = BuildShortId("TRX", transaction.Id),
+                Status = transaction.Status.ToString(),
+                SourceAccountShortId = BuildShortId("ACC", account.Id),
+                SourceAccountInternalId = account.Id,
+                OriginalAmount = request.Amount,
+                FeeAmount = fee,
+                TotalDebit = totalDebit,
+                SourceBalance = account.Balance,
+                CreatedAt = now
+            };
+
+            await _idempotency.CompleteAsync(tenantId, userId, idempotencyKey, response);
+
+            var tenantEntity = await _db.Tenants
+                .AsNoTracking()
+                .SingleOrDefaultAsync(x => x.Id == tenantId);
+
+            if (tenantEntity?.WebhookUrl != null)
+            {
+                var webhookPayload = new WebhookTransactionPayload
+                {
+                    TransactionId = transaction.Id,
+                    TenantId = tenantId,
+                    UserId = userId,
+                    TransactionType = "WITHDRAW",
+                    Amount = request.Amount,
+                    FeeAmount = fee,
+                    Status = "SUCCESS",
+                    CreatedAt = now,
+                    SourceAccountId = account.Id,
+                    CorrelationId = correlationId
+                };
+                await _webhook.NotifyAsync(tenantEntity.WebhookUrl, webhookPayload);
+            }
 
             return response;
         }
@@ -198,5 +526,43 @@ public class TransactionService : ITransactionService
     private static string NormalizeDocumentNumber(string documentNumber)
     {
         return documentNumber.Trim().ToUpperInvariant();
+    }
+
+    private async Task<Guid> ResolveAccountIdAsync(Guid tenantId, string accountKey)
+    {
+        var normalized = accountKey.Trim();
+
+        if (Guid.TryParse(normalized, out var accountId))
+            return accountId;
+
+        var shortCode = normalized.ToUpperInvariant();
+        const string prefix = "ACC-";
+        if (shortCode.StartsWith(prefix, StringComparison.Ordinal))
+            shortCode = shortCode[prefix.Length..];
+
+        if (shortCode.Length < 8)
+            throw new InvalidOperationException("El id de cuenta debe ser un GUID o un codigo corto tipo ACC-1234ABCD");
+
+        var accounts = await _db.Accounts
+            .AsNoTracking()
+            .Where(account => account.TenantId == tenantId)
+            .Select(account => account.Id)
+            .ToListAsync();
+
+        var matches = accounts
+            .Where(id => id.ToString("N").StartsWith(shortCode, StringComparison.OrdinalIgnoreCase))
+            .ToList();
+
+        return matches.Count switch
+        {
+            1 => matches[0],
+            0 => throw new InvalidOperationException("Cuenta no encontrada con ese codigo corto"),
+            _ => throw new InvalidOperationException("El codigo corto de cuenta es ambiguo; usa mas caracteres del GUID")
+        };
+    }
+
+    private static string BuildShortId(string prefix, Guid id)
+    {
+        return $"{prefix}-{id.ToString("N")[..8].ToUpperInvariant()}";
     }
 }

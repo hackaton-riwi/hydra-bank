@@ -3,6 +3,7 @@ using Hydra.Application.Interfaces;
 using Hydra.Domain.Exceptions;
 using Microsoft.AspNetCore.Authorization;
 using Microsoft.AspNetCore.Mvc;
+using Microsoft.AspNetCore.RateLimiting;
 using System.Security.Claims;
 
 namespace Hydra.Api.Controllers;
@@ -10,6 +11,7 @@ namespace Hydra.Api.Controllers;
 [ApiController]
 [Route("api/v1/transactions")]
 [Authorize(Roles = "CLIENT")]
+[EnableRateLimiting("financial")]
 public class TransactionsController : ControllerBase
 {
     private readonly ITransactionService _transactionService;
@@ -48,7 +50,7 @@ public class TransactionsController : ControllerBase
     private (string idempotencyKey, string correlationId) GetRequestHeaders()
     {
         var idempotencyKey = Request.Headers["Idempotency-Key"].FirstOrDefault()
-            ?? throw new BadHttpRequestException("Header Idempotency-Key requerido");
+            ?? Guid.NewGuid().ToString();
 
         var correlationId = Request.Headers["X-Correlation-ID"].FirstOrDefault()
             ?? Guid.NewGuid().ToString();

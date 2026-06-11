@@ -140,6 +140,7 @@ builder.Services.AddSingleton<IConnectionMultiplexer>(_ =>
 
 builder.Services.AddScoped<IIdempotencyService, IdempotencyService>();
 builder.Services.AddScoped<ITransactionService, TransactionService>();
+builder.Services.AddHttpClient<IWebhookNotifier, WebhookNotifier>();
 
 var app = builder.Build();
 
