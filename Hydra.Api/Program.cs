@@ -1,3 +1,6 @@
+using System;
+using System.Collections.Generic;
+using System.Linq;
 using Hydra.Application.Interfaces;
 using Hydra.Application.Services;
 using Hydra.Domain.Entities;
@@ -15,6 +18,12 @@ using System.Security.Claims;
 using System.Text;
 using BankUser = Hydra.Domain.Entities.User;
 using System.Threading.RateLimiting;
+using System.Threading.Tasks;
+using Microsoft.AspNetCore.Builder;
+using Microsoft.AspNetCore.Http;
+using Microsoft.Extensions.Configuration;
+using Microsoft.Extensions.DependencyInjection;
+using Microsoft.Extensions.Hosting;
 
 var builder = WebApplication.CreateBuilder(args);
 

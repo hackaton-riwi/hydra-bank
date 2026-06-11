@@ -1,6 +1,9 @@
+using System;
+using System.Linq;
 using System.Text.RegularExpressions;
 using System.Security.Claims;
 using System.Text.Json;
+using System.Threading.Tasks;
 using Hydra.Application.DTOs;
 using Hydra.Domain.Entities;
 using Hydra.Domain.Enums;

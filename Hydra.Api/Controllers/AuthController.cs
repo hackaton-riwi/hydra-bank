@@ -1,3 +1,5 @@
+using System;
+using System.Collections.Generic;
 using Hydra.Application.DTOs;
 using Hydra.Infrastructure.DATA;
 using Microsoft.AspNetCore.Authorization;
@@ -7,11 +9,14 @@ using Microsoft.AspNetCore.RateLimiting;
 using Microsoft.EntityFrameworkCore;
 using Microsoft.IdentityModel.Tokens;
 using System.IdentityModel.Tokens.Jwt;
+using System.Linq;
 using System.Security.Claims;
 using System.Text.Json;
 using System.Text;
+using System.Threading.Tasks;
 using BankUser = Hydra.Domain.Entities.User;
 using Hydra.Domain.Enums;
+using Microsoft.Extensions.Configuration;
 
 namespace Hydra.Api.Controllers;
 

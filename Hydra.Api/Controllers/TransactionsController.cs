@@ -1,3 +1,5 @@
+using System;
+using System.Linq;
 using Hydra.Application.DTOs;
 using Hydra.Application.Interfaces;
 using Hydra.Domain.Exceptions;
@@ -5,6 +7,8 @@ using Microsoft.AspNetCore.Authorization;
 using Microsoft.AspNetCore.Mvc;
 using Microsoft.AspNetCore.RateLimiting;
 using System.Security.Claims;
+using System.Threading.Tasks;
+using Microsoft.AspNetCore.Http;
 
 namespace Hydra.Api.Controllers;
 

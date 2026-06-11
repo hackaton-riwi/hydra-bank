@@ -1,3 +1,5 @@
+using System;
+using System.Threading.Tasks;
 using Hydra.Application.DTOs;
 using Hydra.Application.Interfaces;
 using Microsoft.AspNetCore.Authorization;
