@@ -1,440 +1,326 @@
-# Hydra API — Documentación de Endpoints
+# Hydra BankOS — Documentación de la API
 
-> Base URL: `https://<host>/api/v1`  
-> Autenticación: `Authorization: Bearer <token>` (JWT)  
-> Rate limiting aplicado en todos los endpoints.
-
----
-
-## 🔐 Auth
-
-**Base:** `/api/v1/auth`  
-Acceso público excepto `/me`.
+> **Base URL:** `https://<tu-dominio>/api/v1`  
+> **Formato:** Todos los endpoints reciben y devuelven `application/json`  
+> **Autenticación:** Bearer Token JWT en el header `Authorization: Bearer <token>`
 
 ---
 
-### `POST /auth/register`
+## Índice
 
-Registra un nuevo cliente en un tenant. Crea el usuario, cuenta bancaria y audit log en una sola transacción atómica.
+1. [Conceptos clave](#conceptos-clave)
+2. [Autenticación — `/api/v1/auth`](#1-autenticación)
+3. [Tenants — `/api/v1/tenants`](#2-tenants)
+4. [Cuentas — `/api/v1/accounts`](#3-cuentas)
+5. [Transacciones financieras](#4-transacciones-financieras)
+6. [Códigos de error comunes](#5-códigos-de-error-comunes)
+7. [Headers especiales para operaciones financieras](#6-headers-especiales)
 
-> **Auth:** ❌ No requerida
+---
 
-**Body:**
+## Conceptos clave
+
+### TenantKey
+Identificador de un tenant. Puede pasarse de tres formas:
+- **Short ID:** `TEN-4A3F21BC` (formato `TEN-` seguido de los primeros 8 caracteres del GUID en mayúscula)
+- **Slug:** `mi-banco` (nombre del tenant en minúsculas con guiones)
+- **GUID completo:** `xxxxxxxx-xxxx-xxxx-xxxx-xxxxxxxxxxxx`
+
+### AccountKey
+Identificador de una cuenta. Puede pasarse de dos formas:
+- **Short ID:** `ACC-1234ABCD` (formato `ACC-` + primeros 8 chars del GUID)
+- **GUID completo:** `xxxxxxxx-xxxx-xxxx-xxxx-xxxxxxxxxxxx`
+
+### Short IDs
+El sistema genera IDs cortos con el patrón `PREFIJO-8CHARS`. Los prefijos son:
+| Prefijo | Entidad |
+|---------|---------|
+| `TEN-` | Tenant |
+| `USR-` | Usuario |
+| `ACC-` | Cuenta |
+| `TRX-` | Transacción |
+| `LOG-` | Audit Log |
+
+### Roles
+| Rol | Permisos |
+|-----|----------|
+| `SUPERADMIN` | Acceso total a todos los tenants |
+| `ADMIN` | Acceso de administración a su propio tenant |
+| `CLIENT` | Acceso a sus propias cuentas y transacciones |
+
+---
+
+## 1. Autenticación
+
+### POST `/api/v1/auth/register`
+Registra un nuevo cliente dentro de un tenant. **No requiere autenticación.** También crea automáticamente una cuenta bancaria para el nuevo usuario.
+
+**Request Body:**
 ```json
 {
-  "email": "string",
-  "password": "string",
-  "fullName": "string",
-  "documentNumber": "string",
-  "tenantSlug": "string"
+  "tenantSlug": "mi-banco",
+  "fullName": "Juan Pérez García",
+  "documentNumber": "1020304050",
+  "email": "juan@ejemplo.com",
+  "password": "miPassword123"
 }
 ```
 
-**Respuesta exitosa:** `201 Created`
+| Campo | Tipo | Obligatorio | Descripción |
+|-------|------|-------------|-------------|
+| `tenantSlug` | string (máx. 50) | ✅ | Slug del tenant al que pertenecerá el cliente. Ej: `mi-banco`. Se obtiene de `GET /api/v1/tenants` |
+| `fullName` | string (máx. 150) | ✅ | Nombre completo del usuario |
+| `documentNumber` | string (máx. 64) | ✅ | Número de documento de identidad. Se normaliza a mayúsculas. Debe ser único dentro del tenant |
+| `email` | string email (máx. 150) | ✅ | Correo electrónico. Debe ser único dentro del tenant |
+| `password` | string (mín. 6) | ✅ | Contraseña del usuario |
+
+**Respuesta exitosa `201 Created`:**
 ```json
 {
   "success": true,
   "code": "CLIENT_REGISTERED",
   "description": "Cliente registrado correctamente. Debe iniciar sesión para obtener token.",
   "user": {
-    "id": "USR-XXXXXXXX",
-    "tenantId": "TEN-XXXXXXXX",
-    "fullName": "string",
-    "documentNumber": "string",
-    "email": "string",
+    "id": "USR-4A3F21BC",
+    "tenantId": "TEN-9B2C87DE",
+    "FullName": "Juan Pérez García",
+    "DocumentNumber": "1020304050",
+    "Email": "juan@ejemplo.com",
     "tenantRole": "CLIENT"
   },
   "account": {
-    "id": "ACC-XXXXXXXX",
-    "accountNumber": "string",
-    "ownerId": "USR-XXXXXXXX",
-    "balance": 0,
-    "currency": "COP",
-    "status": "ACTIVE",
-    "createdAt": "datetime"
+    "id": "ACC-1234ABCD",
+    "AccountNumber": "3748291056",
+    "ownerId": "USR-4A3F21BC",
+    "Balance": 0.00,
+    "Currency": "COP",
+    "Status": "ACTIVE",
+    "CreatedAt": "2025-06-11T10:30:00Z"
   }
 }
 ```
 
-**Errores posibles:**
-
-| Código HTTP | Code | Descripción |
-|-------------|------|-------------|
-| `400` | `DOCUMENT_REQUIRED` | Número de documento vacío |
-| `404` | `TENANT_NOT_FOUND` | Tenant no existe |
-| `409` | `EMAIL_ALREADY_EXISTS` | Email ya registrado en el tenant |
-| `409` | `DOCUMENT_ALREADY_EXISTS` | Documento ya registrado en el tenant |
+> ⚠️ **Importante:** El registro no devuelve un token JWT. Después de registrarse, el usuario debe hacer `POST /api/v1/auth/login` para obtener su token.
 
 ---
 
-### `POST /auth/login`
+### POST `/api/v1/auth/login`
+Autentica un usuario y devuelve un JWT. **No requiere autenticación.**
 
-Autentica un usuario y retorna un JWT con claims del tenant.
-
-> **Auth:** ❌ No requerida
-
-**Body:**
+**Request Body:**
 ```json
 {
-  "email": "string",
-  "password": "string",
-  "tenantSlug": "string"
+  "tenantSlug": "mi-banco",
+  "email": "juan@ejemplo.com",
+  "password": "miPassword123"
 }
 ```
 
-**Respuesta exitosa:** `200 OK`
+| Campo | Tipo | Obligatorio | Descripción |
+|-------|------|-------------|-------------|
+| `tenantSlug` | string (máx. 50) | ✅ | Slug del tenant. Sin esto el sistema no puede identificar al usuario (dos tenants distintos pueden tener el mismo email) |
+| `email` | string email | ✅ | Correo del usuario |
+| `password` | string | ✅ | Contraseña |
+
+**Respuesta exitosa `200 OK`:**
 ```json
 {
-  "token": "string (JWT)",
-  "expiresAt": "datetime",
+  "token": "eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9...",
+  "expiresAt": "2025-06-11T11:30:00Z",
   "user": {
-    "id": "USR-XXXXXXXX",
-    "tenantId": "TEN-XXXXXXXX",
-    "fullName": "string",
-    "documentNumber": "string",
-    "email": "string",
+    "id": "USR-4A3F21BC",
+    "tenantId": "TEN-9B2C87DE",
+    "fullName": "Juan Pérez García",
+    "documentNumber": "1020304050",
+    "email": "juan@ejemplo.com",
     "roles": ["CLIENT"],
     "tenantRole": "CLIENT"
   },
-  "account": { ... }
+  "account": {
+    "id": "ACC-1234ABCD",
+    "AccountNumber": "3748291056",
+    "ownerId": "USR-4A3F21BC",
+    "Balance": 150000.00,
+    "Currency": "COP",
+    "Status": "ACTIVE",
+    "CreatedAt": "2025-06-11T10:30:00Z"
+  }
 }
 ```
 
-> El JWT incluye los claims: `tenant_id`, `user_id`, `tenant_role`, `identity_user_id`.
-
-**Errores posibles:**
-
-| Código HTTP | Code | Descripción |
-|-------------|------|-------------|
-| `401` | `INVALID_TENANT_CREDENTIALS` | Tenant, usuario o contraseña inválidos |
+| Campo respuesta | Descripción |
+|----------------|-------------|
+| `token` | JWT Bearer token. Usarlo en el header `Authorization: Bearer <token>` para todas las llamadas protegidas |
+| `expiresAt` | Fecha/hora UTC en que vence el token |
+| `user.id` | Short ID del usuario (`USR-XXXXXXXX`) |
+| `user.tenantId` | Short ID del tenant al que pertenece (`TEN-XXXXXXXX`) |
+| `user.roles` | Roles de identidad (sistema de autenticación): `["CLIENT"]`, `["ADMIN"]`, etc. |
+| `user.tenantRole` | Rol dentro del banco: `CLIENT`, `ADMIN` o `SUPERADMIN` |
+| `account` | Cuenta bancaria asociada. Puede ser `null` si el usuario no tiene cuenta aún |
 
 ---
 
-### `GET /auth/me`
+### GET `/api/v1/auth/me`
+Devuelve la información del usuario autenticado según el token. **Requiere autenticación.**
 
-Retorna el perfil del usuario autenticado y su cuenta asociada.
+**Headers:**
+```
+Authorization: Bearer <token>
+```
 
-> **Auth:** ✅ Cualquier rol
-
-**Respuesta exitosa:** `200 OK`
+**Respuesta exitosa `200 OK`:**
 ```json
 {
   "user": {
-    "id": "USR-XXXXXXXX",
-    "tenantId": "TEN-XXXXXXXX",
-    "fullName": "string",
-    "documentNumber": "string",
-    "email": "string",
+    "id": "USR-4A3F21BC",
+    "tenantId": "TEN-9B2C87DE",
+    "fullName": "Juan Pérez García",
+    "documentNumber": "1020304050",
+    "email": "juan@ejemplo.com",
     "roles": ["CLIENT"],
     "tenantRole": "CLIENT"
   },
-  "account": { ... }
+  "account": {
+    "id": "ACC-1234ABCD",
+    "AccountNumber": "3748291056",
+    "ownerId": "USR-4A3F21BC",
+    "Balance": 150000.00,
+    "Currency": "COP",
+    "Status": "ACTIVE",
+    "CreatedAt": "2025-06-11T10:30:00Z"
+  }
 }
 ```
 
 ---
 
-## 🏦 Accounts
+## 2. Tenants
 
-**Base:** `/api/v1/accounts`  
-Todos los endpoints requieren rol `CLIENT`.
+### GET `/api/v1/tenants`
+Lista todos los tenants registrados. **No requiere autenticación.**
 
----
-
-### `POST /accounts`
-
-Crea una cuenta bancaria.
-
-> **Auth:** ✅ Rol `CLIENT`
-
-**Body:** `CreateAccountDto` (ver DTOs)
-
-**Respuesta exitosa:** `201 Created` — objeto de la cuenta creada.
-
-**Errores posibles:**
-
-| Código HTTP | Code | Descripción |
-|-------------|------|-------------|
-| `401` | `UNAUTHORIZED` | Sin permisos |
-| `400` | `ACCOUNT_CREATE_FAILED` | Error al crear la cuenta |
-
----
-
-### `DELETE /accounts/{accountKey}`
-
-Desactiva una cuenta bancaria.
-
-> **Auth:** ✅ Rol `CLIENT`
-
-**Path param:** `accountKey` — ID o key de la cuenta.
-
-**Respuesta exitosa:** `200 OK`
-
-**Errores posibles:**
-
-| Código HTTP | Code | Descripción |
-|-------------|------|-------------|
-| `400` | `ACCOUNT_DEACTIVATE_FAILED` | No se pudo desactivar |
-
----
-
-### `POST /accounts/recharge`
-
-Recarga saldo a una cuenta.
-
-> **Auth:** ✅ Rol `CLIENT`
-
-**Body:**
-```json
-{
-  "accountKey": "string",
-  "amount": 0
-}
-```
-
-**Respuesta exitosa:** `200 OK`
-
-**Errores posibles:**
-
-| Código HTTP | Code | Descripción |
-|-------------|------|-------------|
-| `400` | `ACCOUNT_RECHARGE_FAILED` | Error al recargar |
-
----
-
-### `GET /accounts/transactions`
-
-Historial de transacciones del cliente autenticado.
-
-> **Auth:** ✅ Rol `CLIENT`
-
-**Query params:** `TransactionHistoryQueryDto` (filtros de fecha, tipo, paginación)
-
-**Respuesta exitosa:** `200 OK` — lista de transacciones.
-
----
-
-### `POST /accounts/transfer`
-
-Transferencia entre cuentas. Soporta idempotencia.
-
-> **Auth:** ✅ Rol `CLIENT`
-
-**Headers opcionales:**
-- `Idempotency-Key: UUID`
-- `X-Correlation-ID: UUID` *(también se retorna en la respuesta)*
-
-**Body:**
-```json
-{
-  "sourceAccountKey": "string",
-  "destinationAccountKey": "string",
-  "amount": 0
-}
-```
-
-**Respuesta exitosa:** `200 OK` + header `X-Correlation-ID`
-
-**Errores posibles:**
-
-| Código HTTP | Code | Descripción |
-|-------------|------|-------------|
-| `423` | `IDEMPOTENCY_CONFLICT` | Transacción duplicada en progreso |
-| `400` | `TRANSFER_FAILED` | Error en la transferencia |
-
----
-
-### `POST /accounts/deposit`
-
-Depósito a una cuenta. Idempotente.
-
-> **Auth:** ✅ Rol `CLIENT`
-
-**Headers opcionales:** `Idempotency-Key`, `X-Correlation-ID`
-
-**Body:**
-```json
-{
-  "accountKey": "string",
-  "amount": 0
-}
-```
-
-**Respuesta exitosa:** `200 OK` + header `X-Correlation-ID`
-
-**Errores posibles:**
-
-| Código HTTP | Code | Descripción |
-|-------------|------|-------------|
-| `423` | `IDEMPOTENCY_CONFLICT` | Transacción duplicada |
-| `400` | `DEPOSIT_FAILED` | Error en el depósito |
-
----
-
-### `POST /accounts/withdraw`
-
-Retiro de fondos de una cuenta. Idempotente.
-
-> **Auth:** ✅ Rol `CLIENT`
-
-**Headers opcionales:** `Idempotency-Key`, `X-Correlation-ID`
-
-**Body:**
-```json
-{
-  "accountKey": "string",
-  "amount": 0
-}
-```
-
-**Respuesta exitosa:** `200 OK` + header `X-Correlation-ID`
-
-**Errores posibles:**
-
-| Código HTTP | Code | Descripción |
-|-------------|------|-------------|
-| `423` | `IDEMPOTENCY_CONFLICT` | Transacción duplicada |
-| `400` | `WITHDRAW_FAILED` | Error en el retiro |
-
----
-
-## 💸 Transactions
-
-**Base:** `/api/v1/transactions`  
-Todos los endpoints requieren rol `CLIENT`.
-
----
-
-### `POST /transactions/transfer`
-
-Transferencia usando contexto del token (tenant y usuario extraídos del JWT).
-
-> **Auth:** ✅ Rol `CLIENT`
-
-**Headers requeridos:**
-- `Idempotency-Key: UUID` *(si no se envía, se genera uno automáticamente)*
-- `X-Correlation-ID: UUID` *(si no se envía, se genera uno automáticamente)*
-
-**Body:**
-```json
-{
-  "sourceAccountKey": "string",
-  "destinationAccountKey": "string",
-  "amount": 0
-}
-```
-
-**Respuesta exitosa:** `200 OK` + header `X-Correlation-ID`
-
-**Errores posibles:**
-
-| Código HTTP | Descripción |
-|-------------|-------------|
-| `423` | Transacción en progreso (`TransactionInProgressException`) |
-| `400` | Parámetros inválidos o error de negocio |
-
----
-
-## 🏢 Tenants
-
-**Base:** `/api/v1/tenants`
-
----
-
-### `GET /tenants`
-
-Lista todos los tenants registrados con su configuración.
-
-> **Auth:** ❌ No requerida
-
-**Respuesta exitosa:** `200 OK`
+**Respuesta exitosa `200 OK`:**
 ```json
 {
   "tenants": [
     {
-      "id": "TEN-XXXXXXXX",
-      "name": "string",
-      "slug": "string",
-      "mainCurrency": "COP",
-      "maxTransactionAmount": 5000000,
-      "feeType": "FIXED",
-      "feeValue": 0,
-      "createdAt": "datetime"
+      "id": "TEN-9B2C87DE",
+      "Name": "Mi Banco",
+      "Slug": "mi-banco",
+      "MainCurrency": "COP",
+      "MaxTransactionAmount": 5000000.00,
+      "FeeType": "FIXED",
+      "FeeValue": 0.00,
+      "CreatedAt": "2025-06-01T08:00:00Z"
     }
   ]
 }
 ```
 
+| Campo respuesta | Descripción |
+|----------------|-------------|
+| `id` | Short ID del tenant (`TEN-XXXXXXXX`) |
+| `Slug` | Identificador textual único del tenant. Se usa en login y registro |
+| `MainCurrency` | Moneda principal, siempre `COP` |
+| `MaxTransactionAmount` | Monto máximo permitido por transacción (por defecto 5.000.000) |
+| `FeeType` | Tipo de comisión: `FIXED` (valor fijo) o `PERCENTAGE` (porcentaje) |
+| `FeeValue` | Valor de la comisión (por defecto 0) |
+
 ---
 
-### `POST /tenants`
+### POST `/api/v1/tenants`
+Crea un nuevo tenant junto con su usuario administrador. **No requiere autenticación.**
 
-Crea un nuevo tenant con su usuario ADMIN. El slug se genera automáticamente desde el nombre.
-
-> **Auth:** ❌ No requerida
-
-**Body:**
+**Request Body:**
 ```json
 {
-  "nombreTenant": "string",
-  "correo": "string",
-  "password": "string"
+  "nombreTenant": "Mi Banco",
+  "correo": "admin@mibanco.com",
+  "password": "adminPass123"
 }
 ```
 
-**Respuesta exitosa:** `201 Created`
+| Campo | Tipo | Obligatorio | Descripción |
+|-------|------|-------------|-------------|
+| `nombreTenant` | string (máx. 100) | ✅ | Nombre del tenant. De aquí se genera automáticamente el `slug` (ej: "Mi Banco" → `mi-banco`) |
+| `correo` | string email (máx. 150) | ✅ | Correo del administrador del tenant |
+| `password` | string (mín. 6) | ✅ | Contraseña del administrador |
+
+**Respuesta exitosa `201 Created`:**
 ```json
 {
   "tenant": {
-    "id": "TEN-XXXXXXXX",
-    "name": "string",
-    "slug": "string",
-    "mainCurrency": "COP",
-    "maxTransactionAmount": 5000000,
-    "feeType": "FIXED",
-    "feeValue": 0,
-    "webhookUrl": null,
-    "createdAt": "datetime",
-    "updatedAt": "datetime"
+    "id": "TEN-9B2C87DE",
+    "Name": "Mi Banco",
+    "Slug": "mi-banco",
+    "MainCurrency": "COP",
+    "MaxTransactionAmount": 5000000.00,
+    "FeeType": "FIXED",
+    "FeeValue": 0.00,
+    "WebhookUrl": null,
+    "CreatedAt": "2025-06-11T10:00:00Z",
+    "UpdatedAt": "2025-06-11T10:00:00Z"
   },
   "admin": {
-    "id": "USR-XXXXXXXX",
-    "tenantId": "TEN-XXXXXXXX",
-    "fullName": "string",
-    "email": "string",
-    "role": "ADMIN",
-    "createdAt": "datetime"
+    "id": "USR-7F2A11CC",
+    "tenantId": "TEN-9B2C87DE",
+    "FullName": "Administrador Mi Banco",
+    "Email": "admin@mibanco.com",
+    "Role": "ADMIN",
+    "CreatedAt": "2025-06-11T10:00:00Z"
   }
 }
 ```
 
+| Campo respuesta | Descripción |
+|----------------|-------------|
+| `tenant.Slug` | Guárdalo: se usa en `tenantSlug` del login y registro |
+| `tenant.WebhookUrl` | URL de notificación de transacciones (se configura después). Inicialmente `null` |
+| `admin.id` | Short ID del admin creado automáticamente |
+
 ---
 
-### `GET /tenants/{tenantKey}/users`
+### GET `/api/v1/tenants/{tenantKey}/users`
+Lista todos los usuarios del tenant con sus cuentas. **Requiere rol `ADMIN` o `SUPERADMIN`.**
 
-Lista todos los usuarios del tenant con sus cuentas y balance total acumulado.
+**Path params:**
+| Param | Descripción |
+|-------|-------------|
+| `tenantKey` | Short ID (`TEN-XXXXXXXX`), slug (`mi-banco`) o GUID completo del tenant |
 
-> **Auth:** ✅ Roles `ADMIN` / `SUPERADMIN`  
-> Un ADMIN solo puede consultar su propio tenant.
-
-**Path param:** `tenantKey` — slug, shortId (`TEN-XXXXXXXX`) o UUID del tenant.
-
-**Respuesta exitosa:** `200 OK`
+**Respuesta exitosa `200 OK`:**
 ```json
 {
-  "tenant": { ... },
-  "totalUsers": 0,
-  "totalBalance": 0,
+  "tenant": {
+    "id": "TEN-9B2C87DE",
+    "Name": "Mi Banco",
+    "Slug": "mi-banco",
+    "MainCurrency": "COP",
+    "MaxTransactionAmount": 5000000.00,
+    "FeeType": "FIXED",
+    "FeeValue": 0.00
+  },
+  "totalUsers": 3,
+  "totalBalance": 450000.00,
   "users": [
     {
-      "id": "USR-XXXXXXXX",
-      "tenantId": "TEN-XXXXXXXX",
-      "fullName": "string",
-      "documentNumber": "string",
-      "email": "string",
-      "role": "CLIENT",
-      "createdAt": "datetime",
-      "accounts": [ { ... } ]
+      "id": "USR-4A3F21BC",
+      "tenantId": "TEN-9B2C87DE",
+      "FullName": "Juan Pérez García",
+      "DocumentNumber": "1020304050",
+      "Email": "juan@ejemplo.com",
+      "Role": "CLIENT",
+      "CreatedAt": "2025-06-11T10:30:00Z",
+      "Accounts": [
+        {
+          "id": "ACC-1234ABCD",
+          "AccountNumber": "3748291056",
+          "Balance": 150000.00,
+          "Currency": "COP",
+          "Status": "ACTIVE",
+          "CreatedAt": "2025-06-11T10:30:00Z"
+        }
+      ]
     }
   ]
 }
@@ -442,152 +328,497 @@ Lista todos los usuarios del tenant con sus cuentas y balance total acumulado.
 
 ---
 
-### `GET /tenants/{tenantKey}/transactions`
+### GET `/api/v1/tenants/{tenantKey}/transactions`
+Historial de transacciones del tenant con filtros. **Requiere rol `ADMIN` o `SUPERADMIN`.**
 
-Historial de transacciones del tenant con filtros y paginación.
-
-> **Auth:** ✅ Roles `ADMIN` / `SUPERADMIN`
-
-**Path param:** `tenantKey`
-
-**Query params:**
-
+**Query params opcionales:**
 | Param | Tipo | Descripción |
 |-------|------|-------------|
-| `from` | `datetime` | Fecha inicio |
-| `to` | `datetime` | Fecha fin |
-| `type` | `TransactionType` | Tipo de transacción |
-| `limit` | `int` | Registros por página (1–200, default 50) |
-| `offset` | `int` | Desplazamiento (default 0) |
+| `from` | datetime | Fecha/hora inicio del filtro (UTC). Ej: `2025-06-01T00:00:00Z` |
+| `to` | datetime | Fecha/hora fin del filtro (UTC) |
+| `type` | string | Tipo de transacción: `TRANSFER`, `DEPOSIT` o `WITHDRAW` |
+| `limit` | int (1–200) | Cantidad de resultados por página. Por defecto `50` |
+| `offset` | int | Posición de inicio para paginación. Por defecto `0` |
 
-**Respuesta exitosa:** `200 OK`
+**Respuesta exitosa `200 OK`:**
 ```json
 {
-  "tenant": { ... },
+  "tenant": { "id": "TEN-9B2C87DE", "Name": "Mi Banco", "Slug": "mi-banco", "..." : "..." },
   "limit": 50,
   "offset": 0,
-  "total": 0,
-  "totalMoved": 0,
-  "totalFees": 0,
+  "total": 120,
+  "totalMoved": 8500000.00,
+  "totalFees": 0.00,
   "items": [
     {
-      "id": "TRX-XXXXXXXX",
-      "userId": "USR-XXXXXXXX",
-      "userName": "string",
-      "userDocument": "string",
-      "type": "string",
-      "originalAmount": 0,
-      "feeAmount": 0,
-      "sourceAccountId": "ACC-XXXXXXXX",
-      "destinationAccountId": "ACC-XXXXXXXX",
-      "status": "SUCCESS",
-      "correlationId": "string",
-      "createdAt": "datetime"
+      "id": "TRX-AA11BB22",
+      "userId": "USR-4A3F21BC",
+      "UserName": "Juan Pérez García",
+      "UserDocument": "1020304050",
+      "Type": "TRANSFER",
+      "OriginalAmount": 100000.00,
+      "FeeAmount": 0.00,
+      "sourceAccountId": "ACC-1234ABCD",
+      "destinationAccountId": "ACC-5678EFGH",
+      "Status": "SUCCESS",
+      "CorrelationId": "xxxxxxxx-xxxx-xxxx-xxxx-xxxxxxxxxxxx",
+      "CreatedAt": "2025-06-11T14:00:00Z"
     }
   ]
 }
 ```
 
+| Campo respuesta | Descripción |
+|----------------|-------------|
+| `totalMoved` | Suma de montos originales de transacciones exitosas en el rango |
+| `totalFees` | Suma de comisiones cobradas en transacciones exitosas |
+| `items[].Type` | `TRANSFER`, `DEPOSIT` o `WITHDRAW` |
+| `items[].Status` | `SUCCESS` o `FAILED` |
+| `items[].CorrelationId` | UUID de correlación para trazabilidad. Viene del header `X-Correlation-ID` |
+
 ---
 
-### `GET /tenants/{tenantKey}/audit-logs`
+### GET `/api/v1/tenants/{tenantKey}/audit-logs`
+Historial de auditoría del tenant. **Requiere rol `ADMIN` o `SUPERADMIN`.**
 
-Logs de auditoría del tenant (paginados).
+**Query params opcionales:**
+| Param | Tipo | Descripción |
+|-------|------|-------------|
+| `limit` | int (1–200) | Por defecto `50` |
+| `offset` | int | Por defecto `0` |
 
-> **Auth:** ✅ Roles `ADMIN` / `SUPERADMIN`
-
-**Query params:** `limit` (default 50, max 200), `offset` (default 0)
-
-**Respuesta exitosa:** `200 OK`
+**Respuesta exitosa `200 OK`:**
 ```json
 {
-  "tenant": { ... },
+  "tenant": { "id": "TEN-9B2C87DE", "..." : "..." },
   "limit": 50,
   "offset": 0,
-  "total": 0,
+  "total": 45,
   "logs": [
     {
-      "id": "LOG-XXXXXXXX",
-      "userId": "USR-XXXXXXXX",
-      "userName": "string",
-      "action": "string",
-      "oldValue": null,
-      "newValue": "string (JSON)",
-      "createdAt": "datetime"
+      "id": "LOG-CC33DD44",
+      "userId": "USR-4A3F21BC",
+      "UserName": "Juan Pérez García",
+      "Action": "TRANSFER",
+      "OldValue": "{\"SourceAccountId\": \"...\", \"SourcePreviousBalance\": 250000}",
+      "NewValue": "{\"SourceBalance\": 150000, \"Amount\": 100000, \"Fee\": 0}",
+      "CreatedAt": "2025-06-11T14:00:00Z"
     }
   ]
 }
 ```
 
----
-
-### `GET /tenants/current/users`
-
-Alias de `/tenants/{tenantKey}/users` usando el `tenant_id` del token.
-
-> **Auth:** ✅ Roles `ADMIN` / `SUPERADMIN`
-
----
-
-### `GET /tenants/current/transactions`
-
-Alias de `/tenants/{tenantKey}/transactions` usando el `tenant_id` del token.
-
-> **Auth:** ✅ Roles `ADMIN` / `SUPERADMIN`
-
-**Query params:** igual que `/tenants/{tenantKey}/transactions`
+| `Action` posibles | Descripción |
+|-------------------|-------------|
+| `CLIENT_REGISTERED` | Registro de nuevo cliente |
+| `TENANT_CREATED` | Creación de tenant |
+| `ACCOUNT_CREATED` | Creación de cuenta |
+| `ACCOUNT_DEACTIVATED` | Desactivación de cuenta |
+| `ACCOUNT_RECHARGED` | Recarga de cuenta |
+| `TRANSFER` | Transferencia entre cuentas |
+| `DEPOSIT` | Depósito |
+| `WITHDRAW` | Retiro |
 
 ---
 
-### `GET /tenants/current/audit-logs`
+### Endpoints equivalentes con tenant del token autenticado
 
-Alias de `/tenants/{tenantKey}/audit-logs` usando el `tenant_id` del token.
+Estos endpoints son iguales a los anteriores pero usan el tenant_id del token JWT en lugar de un `{tenantKey}` en la URL. Útiles para admins que ya están autenticados.
 
-> **Auth:** ✅ Roles `ADMIN` / `SUPERADMIN`
-
-**Query params:** `limit`, `offset`
+| Endpoint | Equivale a |
+|----------|------------|
+| `GET /api/v1/tenants/current/users` | `GET /api/v1/tenants/{miTenantId}/users` |
+| `GET /api/v1/tenants/current/transactions` | `GET /api/v1/tenants/{miTenantId}/transactions` |
+| `GET /api/v1/tenants/current/audit-logs` | `GET /api/v1/tenants/{miTenantId}/audit-logs` |
 
 ---
 
-### `DELETE /tenants/{tenantKey}`
+### DELETE `/api/v1/tenants/{tenantKey}`
+Elimina un tenant completo con todos sus usuarios, cuentas, transacciones y registros. **Requiere rol `SUPERADMIN`.**
 
-Elimina un tenant con todos sus datos: usuarios, cuentas, transacciones, audit logs e identidades de autenticación.
-
-> **Auth:** ✅ Solo rol `SUPERADMIN`
-
-**Respuesta exitosa:** `200 OK`
+**Respuesta exitosa `200 OK`:**
 ```json
 {
   "success": true,
   "code": "TENANT_DELETED",
-  "description": "...",
-  "tenant": { ... },
+  "description": "Tenant eliminado con usuarios, cuentas, transacciones, logs e identidades de autenticación",
+  "tenant": { "id": "TEN-9B2C87DE", "Name": "Mi Banco", "..." : "..." },
   "deleted": {
-    "users": 0,
-    "accounts": 0,
-    "transactions": 0,
-    "auditLogs": 0,
-    "idempotencyRecords": 0
+    "users": 5,
+    "accounts": 5,
+    "transactions": 120,
+    "auditLogs": 45,
+    "idempotencyRecords": 80
+  }
+}
+```
+
+> ⚠️ **Esta operación es irreversible.** Elimina en cascada toda la información del tenant.
+
+---
+
+## 3. Cuentas
+
+> Todos los endpoints de `/api/v1/accounts` requieren autenticación con rol `CLIENT`.
+
+### POST `/api/v1/accounts`
+Crea una cuenta bancaria para el cliente autenticado. **Cada cliente solo puede tener una cuenta.**
+
+**Request Body:** vacío `{}` (no se requieren campos)
+
+**Respuesta exitosa `201 Created`:**
+```json
+{
+  "success": true,
+  "code": "ACCOUNT_CREATED",
+  "description": "Cuenta creada correctamente",
+  "data": {
+    "id": "ACC-1234ABCD",
+    "AccountNumber": "3748291056",
+    "ownerId": "USR-4A3F21BC",
+    "FullName": "Juan Pérez García",
+    "DocumentNumber": "1020304050",
+    "Balance": 0.00,
+    "Currency": "COP",
+    "Status": "ACTIVE",
+    "CreatedAt": "2025-06-11T10:30:00Z"
+  }
+}
+```
+
+> ℹ️ Al registrarse con `POST /api/v1/auth/register`, ya se crea una cuenta automáticamente. Este endpoint es para casos donde el usuario no tiene cuenta todavía.
+
+---
+
+### DELETE `/api/v1/accounts/{accountKey}`
+Desactiva la cuenta del cliente autenticado.
+
+**Path params:**
+| Param | Descripción |
+|-------|-------------|
+| `accountKey` | Short ID (`ACC-1234ABCD`) o GUID de la cuenta |
+
+**Respuesta exitosa `200 OK`:**
+```json
+{
+  "success": true,
+  "code": "ACCOUNT_DEACTIVATED",
+  "description": "Cuenta desactivada correctamente",
+  "data": {
+    "id": "ACC-1234ABCD",
+    "AccountNumber": "3748291056",
+    "ownerId": "USR-4A3F21BC",
+    "FullName": "Juan Pérez García",
+    "DocumentNumber": "1020304050",
+    "Balance": 150000.00,
+    "Currency": "COP",
+    "Status": "INACTIVE",
+    "CreatedAt": "2025-06-11T10:30:00Z",
+    "UpdatedAt": "2025-06-11T15:00:00Z",
+    "DeactivatedAt": "2025-06-11T15:00:00Z"
   }
 }
 ```
 
 ---
 
-## Roles
+### POST `/api/v1/accounts/recharge`
+Recarga (añade saldo) a la cuenta propia del cliente autenticado. No genera comisión.
 
-| Rol | Descripción |
-|-----|-------------|
-| `CLIENT` | Usuario final del tenant. Accede a cuentas y transacciones propias. |
-| `ADMIN` | Administrador de un tenant. Consulta usuarios, transacciones y logs de su tenant. |
-| `SUPERADMIN` | Acceso total. Puede administrar cualquier tenant y eliminarlos. |
+**Request Body:**
+```json
+{
+  "amount": 50000.00
+}
+```
+
+| Campo | Tipo | Obligatorio | Descripción |
+|-------|------|-------------|-------------|
+| `amount` | decimal | ✅ | Monto a recargar. Debe ser mayor que 0 |
+
+**Respuesta exitosa `200 OK`:**
+```json
+{
+  "success": true,
+  "code": "ACCOUNT_RECHARGED",
+  "description": "Cuenta recargada correctamente",
+  "data": {
+    "id": "ACC-1234ABCD",
+    "AccountNumber": "3748291056",
+    "ownerId": "USR-4A3F21BC",
+    "FullName": "Juan Pérez García",
+    "DocumentNumber": "1020304050",
+    "Balance": 200000.00,
+    "Currency": "COP",
+    "Status": "ACTIVE",
+    "CreatedAt": "2025-06-11T10:30:00Z",
+    "UpdatedAt": "2025-06-11T15:30:00Z",
+    "DeactivatedAt": null
+  }
+}
+```
 
 ---
 
-## Notas generales
+### GET `/api/v1/accounts/transactions`
+Historial de transacciones del cliente autenticado.
 
-- Los IDs se retornan en formato short: `USR-XXXXXXXX`, `TEN-XXXXXXXX`, `ACC-XXXXXXXX`, `TRX-XXXXXXXX`, `LOG-XXXXXXXX`.
-- El `tenantKey` acepta tres formatos: **slug** (`mi-banco`), **shortId** (`TEN-XXXXXXXX`) o **UUID**.
-- Las operaciones financieras (`transfer`, `deposit`, `withdraw`) son idempotentes. Enviar `Idempotency-Key` como UUID en el header previene duplicados.
-- El header `X-Correlation-ID` se retorna en la respuesta para trazabilidad.
-- El JWT expira según configuración (`Jwt:ExpireMinutes`), por defecto **60 minutos**.
+**Query params opcionales:**
+| Param | Tipo | Descripción |
+|-------|------|-------------|
+| `limit` | int (1–100) | Por defecto `20` |
+| `offset` | int | Por defecto `0` |
+| `from` | datetime | Fecha inicio (UTC). Ej: `2025-06-01T00:00:00Z` |
+| `to` | datetime | Fecha fin (UTC) |
+| `type` | string | `TRANSFER`, `DEPOSIT` o `WITHDRAW` |
+
+**Respuesta exitosa `200 OK`:**
+```json
+{
+  "success": true,
+  "code": "TRANSACTION_HISTORY",
+  "description": "Historial consultado correctamente",
+  "data": {
+    "limit": 20,
+    "offset": 0,
+    "total": 35,
+    "items": [
+      {
+        "id": "TRX-AA11BB22",
+        "Type": "TRANSFER",
+        "OriginalAmount": 100000.00,
+        "FeeAmount": 0.00,
+        "sourceAccountId": "ACC-1234ABCD",
+        "destinationAccountId": "ACC-5678EFGH",
+        "Status": "SUCCESS",
+        "CreatedAt": "2025-06-11T14:00:00Z"
+      }
+    ]
+  }
+}
+```
+
+---
+
+## 4. Transacciones Financieras
+
+> Todos los endpoints de transacciones bajo `/api/v1/accounts` requieren rol `CLIENT`.
+> Las operaciones financieras soportan **idempotencia** para evitar duplicados.
+
+### Headers requeridos para operaciones financieras
+
+| Header | Tipo | Obligatorio | Descripción |
+|--------|------|-------------|-------------|
+| `Authorization` | string | ✅ | `Bearer <token>` |
+| `Idempotency-Key` | UUID | ✅ | UUID v4 único por operación. Si se repite la misma clave, se devuelve el resultado original en lugar de procesar de nuevo |
+| `X-Correlation-ID` | UUID | ✅ | UUID v4 para trazabilidad y correlación entre sistemas |
+
+> **¿Cómo funciona la idempotencia?** Si envías el mismo `Idempotency-Key` dos veces, la segunda llamada devuelve exactamente la misma respuesta que la primera, sin ejecutar la transacción de nuevo. Si la transacción aún está en progreso, recibirás `423 Locked`.
+
+---
+
+### POST `/api/v1/accounts/transfer`
+Transfiere fondos de la cuenta del cliente autenticado a otro cliente del mismo tenant, identificado por su número de documento.
+
+**Headers requeridos:** `Authorization`, `Idempotency-Key`, `X-Correlation-ID`
+
+**Request Body:**
+```json
+{
+  "destinationDocumentNumber": "9876543210",
+  "amount": 100000.00
+}
+```
+
+| Campo | Tipo | Obligatorio | Descripción |
+|-------|------|-------------|-------------|
+| `destinationDocumentNumber` | string (máx. 64) | ✅ | Número de documento del cliente **destino** dentro del mismo tenant. Se normaliza a mayúsculas. No puede ser el mismo usuario |
+| `amount` | decimal | ✅ | Monto a transferir en COP. Debe ser mayor que 0 y no superar `MaxTransactionAmount` del tenant |
+
+**Respuesta exitosa `200 OK`:**
+```json
+{
+  "id": "TRX-AA11BB22",
+  "TransactionShortId": "TRX-AA11BB22",
+  "Status": "SUCCESS",
+  "SourceAccountShortId": "ACC-1234ABCD",
+  "DestinationAccountShortId": "ACC-5678EFGH",
+  "DestinationDocumentNumber": "9876543210",
+  "Amount": 100000.00,
+  "FeeAmount": 0.00,
+  "SourceBalance": 50000.00,
+  "DestinationBalance": 250000.00,
+  "CreatedAt": "2025-06-11T14:00:00Z"
+}
+```
+
+| Campo respuesta | Descripción |
+|----------------|-------------|
+| `id` | Short ID de la transacción (`TRX-XXXXXXXX`) |
+| `Status` | Siempre `SUCCESS` si no hubo error |
+| `SourceAccountShortId` | Short ID de la cuenta origen (la del usuario autenticado) |
+| `DestinationAccountShortId` | Short ID de la cuenta destino |
+| `Amount` | Monto transferido |
+| `FeeAmount` | Comisión cobrada (calculada según configuración del tenant) |
+| `SourceBalance` | Saldo restante en la cuenta origen después de la operación |
+| `DestinationBalance` | Saldo de la cuenta destino después de recibir |
+
+> **Nota sobre comisiones en transferencia:** El `FeeAmount` se descuenta adicional al monto. El origen paga `Amount + FeeAmount`. El destino recibe exactamente `Amount`.
+
+**Header de respuesta:**
+```
+X-Correlation-ID: <el mismo UUID que enviaste>
+```
+
+---
+
+### POST `/api/v1/accounts/deposit`
+Deposita fondos en una cuenta específica del tenant (no necesariamente la propia).
+
+**Headers requeridos:** `Authorization`, `Idempotency-Key`, `X-Correlation-ID`
+
+**Request Body:**
+```json
+{
+  "destinationAccountId": "ACC-1234ABCD",
+  "amount": 200000.00
+}
+```
+
+| Campo | Tipo | Obligatorio | Descripción |
+|-------|------|-------------|-------------|
+| `destinationAccountId` | string | ✅ | Short ID (`ACC-1234ABCD`) o GUID de la cuenta destino donde se depositarán los fondos |
+| `amount` | decimal | ✅ | Monto a depositar. Debe ser mayor que 0. El monto neto acreditado es `amount - fee` |
+
+**Respuesta exitosa `200 OK`:**
+```json
+{
+  "id": "TRX-BB22CC33",
+  "TransactionShortId": "TRX-BB22CC33",
+  "DestinationAccountShortId": "ACC-1234ABCD",
+  "Status": "SUCCESS",
+  "OriginalAmount": 200000.00,
+  "FeeAmount": 0.00,
+  "NetAmount": 200000.00,
+  "DestinationBalance": 350000.00,
+  "CreatedAt": "2025-06-11T15:00:00Z"
+}
+```
+
+| Campo respuesta | Descripción |
+|----------------|-------------|
+| `OriginalAmount` | Monto bruto enviado en el request |
+| `FeeAmount` | Comisión cobrada |
+| `NetAmount` | Monto real acreditado en la cuenta destino (`OriginalAmount - FeeAmount`) |
+| `DestinationBalance` | Saldo de la cuenta destino después del depósito |
+
+> **Nota sobre comisiones en depósito:** La comisión se descuenta del monto recibido. Si depositas 200.000 y la comisión es 1.000, la cuenta recibe 199.000.
+
+---
+
+### POST `/api/v1/accounts/withdraw`
+Retira fondos de la cuenta propia del cliente autenticado.
+
+**Headers requeridos:** `Authorization`, `Idempotency-Key`, `X-Correlation-ID`
+
+**Request Body:**
+```json
+{
+  "sourceAccountId": "ACC-1234ABCD",
+  "amount": 50000.00
+}
+```
+
+| Campo | Tipo | Obligatorio | Descripción |
+|-------|------|-------------|-------------|
+| `sourceAccountId` | string | ✅ | Short ID (`ACC-1234ABCD`) o GUID de la cuenta de donde se retiran los fondos. Debe pertenecer al usuario autenticado |
+| `amount` | decimal | ✅ | Monto a retirar. El débito total será `amount + fee` |
+
+**Respuesta exitosa `200 OK`:**
+```json
+{
+  "id": "TRX-CC33DD44",
+  "TransactionShortId": "TRX-CC33DD44",
+  "SourceAccountShortId": "ACC-1234ABCD",
+  "Status": "SUCCESS",
+  "OriginalAmount": 50000.00,
+  "FeeAmount": 0.00,
+  "TotalDebit": 50000.00,
+  "SourceBalance": 100000.00,
+  "CreatedAt": "2025-06-11T15:30:00Z"
+}
+```
+
+| Campo respuesta | Descripción |
+|----------------|-------------|
+| `OriginalAmount` | Monto solicitado a retirar |
+| `FeeAmount` | Comisión cobrada |
+| `TotalDebit` | Débito total descontado de la cuenta (`OriginalAmount + FeeAmount`) |
+| `SourceBalance` | Saldo restante después del retiro |
+
+> **Nota sobre comisiones en retiro:** La comisión se cobra adicional al monto. Si retiras 50.000 y la comisión es 1.000, tu cuenta se debita 51.000.
+
+---
+
+## 5. Códigos de error comunes
+
+Todos los errores siguen el formato:
+```json
+{
+  "success": false,
+  "code": "CODIGO_ERROR",
+  "description": "Mensaje descriptivo del error"
+}
+```
+
+| HTTP | Código | Situación |
+|------|--------|-----------|
+| 400 | `ACCOUNT_CREATE_FAILED` | No se pudo crear la cuenta (ya existe o el usuario no es CLIENT) |
+| 400 | `TRANSFER_FAILED` | Transferencia fallida (saldo insuficiente, cuenta inactiva, documento no existe, etc.) |
+| 400 | `DEPOSIT_FAILED` | Depósito fallido |
+| 400 | `WITHDRAW_FAILED` | Retiro fallido |
+| 401 | `INVALID_TENANT_CREDENTIALS` | Email, contraseña o tenant incorrecto en el login |
+| 404 | `TENANT_NOT_FOUND` | El tenant indicado no existe |
+| 409 | `EMAIL_ALREADY_EXISTS` | Ya existe un usuario con ese correo en el tenant |
+| 409 | `DOCUMENT_ALREADY_EXISTS` | Ya existe un usuario con ese documento en el tenant |
+| 423 | `IDEMPOTENCY_CONFLICT` | La transacción con ese `Idempotency-Key` ya está en progreso |
+
+---
+
+## 6. Headers especiales
+
+### Para operaciones financieras (Transfer, Deposit, Withdraw)
+
+```http
+POST /api/v1/accounts/transfer
+Authorization: Bearer eyJhbGci...
+Content-Type: application/json
+Idempotency-Key: 550e8400-e29b-41d4-a716-446655440000
+X-Correlation-ID: 6ba7b810-9dad-11d1-80b4-00c04fd430c8
+```
+
+- **`Idempotency-Key`** debe ser un UUID válido. Generar uno nuevo por cada operación nueva. Reusar el mismo key para reintentar en caso de error de red sin riesgo de duplicar la transacción.
+- **`X-Correlation-ID`** debe ser un UUID válido. Se devuelve en el header de respuesta para rastrear la operación end-to-end.
+
+---
+
+## Flujo típico de integración
+
+```
+1. GET  /api/v1/tenants                    → Obtener el slug del tenant
+2. POST /api/v1/auth/register              → Registrar usuario (crea cuenta automáticamente)
+3. POST /api/v1/auth/login                 → Obtener JWT token
+4. GET  /api/v1/auth/me                    → Verificar sesión y obtener accountId
+5. POST /api/v1/accounts/recharge          → Cargar saldo inicial
+6. POST /api/v1/accounts/transfer          → Transferir a otro usuario
+7. GET  /api/v1/accounts/transactions      → Consultar historial propio
+```
+
+Para administradores:
+```
+1. POST /api/v1/tenants                    → Crear tenant
+2. POST /api/v1/auth/login                 → Autenticarse como ADMIN
+3. GET  /api/v1/tenants/current/users      → Ver todos los usuarios
+4. GET  /api/v1/tenants/current/transactions → Ver todas las transacciones
+5. GET  /api/v1/tenants/current/audit-logs → Ver logs de auditoría
+```
