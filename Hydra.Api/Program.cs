@@ -25,7 +25,7 @@ builder.Services.AddCors(options =>
             .AllowAnyHeader());
 });
 
-const string CorsPolicyName = "AllowFrontendClients";
+const string CorsPolicyName = "*";
 
 builder.Services.AddControllers();
 builder.Services.AddCors(options =>
