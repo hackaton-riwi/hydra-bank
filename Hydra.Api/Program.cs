@@ -18,12 +18,9 @@ using System.Threading.RateLimiting;
 
 var builder = WebApplication.CreateBuilder(args);
 
-// 1. Nombre de política limpio y seguro
 const string CorsPolicyName = "AllowAll";
 
 builder.Services.AddControllers();
-
-// 2. Un solo bloque de configuración de CORS
 builder.Services.AddCors(options =>
 {
     options.AddPolicy(CorsPolicyName, policy =>
@@ -140,26 +137,15 @@ builder.Services.AddSingleton<IConnectionMultiplexer>(_ =>
 builder.Services.AddScoped<IIdempotencyService, IdempotencyService>();
 builder.Services.AddScoped<ITransactionService, TransactionService>();
 
-builder.Services.AddHttpClient<IWebhookNotifier, WebhookNotifier>();
-
-builder.Services.AddCors(options =>
-{
-    options.AddDefaultPolicy(policy =>
-    {
-        policy.AllowAnyOrigin()
-              .AllowAnyHeader()
-              .AllowAnyMethod();
-    });
-});
-
 var app = builder.Build();
 
 await SeedIdentityRolesAsync(app);
 await SeedSuperAdminAsync(app);
 
-app.UseCors("AllowAll");
+var swaggerEnabled = app.Environment.IsDevelopment()
+    || app.Configuration.GetValue<bool>("Swagger:Enabled");
 
-if (app.Environment.IsDevelopment())
+if (swaggerEnabled)
 {
     app.UseSwagger();
     app.UseSwaggerUI();
@@ -167,8 +153,7 @@ if (app.Environment.IsDevelopment())
 
 app.UseHttpsRedirection();
 
-app.UseCors();
-
+app.UseCors(CorsPolicyName);
 app.UseRateLimiter();
 app.UseAuthentication();
 app.UseAuthorization();
