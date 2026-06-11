@@ -13,6 +13,7 @@ jobs:
   build-and-push:
     runs-on: ubuntu-latest
     environment: production
+
     steps:
       - name: Checkout repository
         uses: actions/checkout@v4
@@ -39,6 +40,7 @@ jobs:
     needs: build-and-push
     runs-on: ubuntu-latest
     environment: production
+
     steps:
       - name: Deploy to VPS
         uses: appleboy/ssh-action@v1.0.3
@@ -49,23 +51,18 @@ jobs:
           port: 22
           script: |
             echo "Conexión exitosa al VPS"
-            
-            # Autenticación usando un Personal Access Token guardado en tus secretos
+
             echo "${{ secrets.GHCR_TOKEN }}" | docker login ghcr.io -u "${{ github.actor }}" --password-stdin
-            
-            echo "Descargando la última versión de la imagen..."
+
             docker pull ghcr.io/${{ github.repository }}:latest
-            
-            echo "Deteniendo contenedores antiguos..."
+
             docker stop ${{ github.event.repository.name }} || true
             docker rm ${{ github.event.repository.name }} || true
-            
-            echo "Iniciando el nuevo contenedor de Hydra Bank..."
+
             docker run -d \
               --name ${{ github.event.repository.name }} \
               --restart always \
               -p 8092:8080 \
               ghcr.io/${{ github.repository }}:latest
-            
-            echo "Limpiando imágenes antiguas en desuso..."
+
             docker image prune -f
