@@ -4,51 +4,46 @@ on:
   push:
     branches:
       - main
+
 permissions:
   packages: write
   contents: read
+
 jobs:
   build-and-push:
     runs-on: ubuntu-latest
     environment: production
+
     steps:
       - name: Checkout repository
-        uses: actions/checkout@v2
-
-      - name: Set up Docker Buildx
-        uses: docker/setup-buildx-action@v2  # Configurar el soporte para Buildx, que permite construir imágenes de manera optimizada
-
-      - name: Cache Docker layers
-        uses: actions/cache@v4  # Habilitar el caching para las capas de Docker y evitar que se reconstruyan siempre
-
-        with:
-          path: /tmp/.buildx-cache
-          key: ${{ runner.os }}-buildx-${{ github.sha }}
-          restore-keys: |
-            ${{ runner.os }}-buildx-
+        uses: actions/checkout@v4
 
       - name: Login to GitHub Container Registry
-        uses: docker/login-action@v2  # Hacer login en GHCR usando las credenciales de GitHub
+        uses: docker/login-action@v3
         with:
           registry: ghcr.io
           username: ${{ github.actor }}
-          password: ${{ secrets.GITHUB_TOKEN }} 
+          password: ${{ secrets.GITHUB_TOKEN }}
 
-      - name: Build and push Docker image
+      - name: Build Docker image
         run: |
-          # Construir la imagen Docker usando el Dockerfile
-          docker build -f Dockerfile -t ghcr.io/${{ github.repository }}:latest .
+          docker build \
+            -f Hydra.Api/Dockerfile \
+            -t ghcr.io/${{ github.repository }}:latest \
+            .
 
-          # Subir la imagen construida a GHCR
+      - name: Push Docker image
+        run: |
           docker push ghcr.io/${{ github.repository }}:latest
 
   deploy:
     needs: build-and-push
     runs-on: ubuntu-latest
     environment: production
+
     steps:
       - name: Deploy to VPS
-        uses: appleboy/ssh-action@v0.1.9
+        uses: appleboy/ssh-action@v1.0.3
         with:
           host: 95.111.229.119
           username: root
@@ -57,11 +52,15 @@ jobs:
           script: |
             echo "Conexión exitosa al VPS"
 
-            docker login ghcr.io -u "estiven-piedrahita" -p ${{ secrets.TOKEN}} 
-            docker pull ghcr.io/${{ github.repository }}:latest
-            docker stop ${{github.event.repository.name}} || true
-            docker rm ${{github.event.repository.name}} || true
+            docker login ghcr.io -u "${{ github.actor }}" -p "${{ secrets.TOKEN }}"
 
-            docker run -d --name ${{ github.event.repository.name }} \
-                         -p 8080:8080 \
-                         ghcr.io/${{ github.repository }}:latest
+            docker pull ghcr.io/${{ github.repository }}:latest
+
+            docker stop ${{ github.event.repository.name }} || true
+            docker rm ${{ github.event.repository.name }} || true
+
+            docker run -d \
+              --name ${{ github.event.repository.name }} \
+              --restart always \
+              -p 8080:8080 \
+              ghcr.io/${{ github.repository }}:latest
