@@ -10,6 +10,8 @@ public interface IAccountService
 
     Task<object> RechargeAsync(RechargeAccountDto request);
 
+    Task<object> GetMyAccountAsync();
+
     Task<object> GetTransactionsAsync(TransactionHistoryQueryDto query);
 
     Task<TransferResponseDto> TransferAsync(TransferRequestDto dto);

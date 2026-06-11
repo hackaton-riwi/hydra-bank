@@ -64,6 +64,23 @@ public class AccountsController : ControllerBase
         }
     }
 
+    [HttpGet("me")]
+    public async Task<IActionResult> GetMyAccount()
+    {
+        try
+        {
+            return Ok(await _accountService.GetMyAccountAsync());
+        }
+        catch (UnauthorizedAccessException ex)
+        {
+            return Unauthorized(Error("UNAUTHORIZED", ex.Message));
+        }
+        catch (InvalidOperationException ex)
+        {
+            return NotFound(Error("ACCOUNT_NOT_FOUND", ex.Message));
+        }
+    }
+
     [HttpGet("transactions")]
     public async Task<IActionResult> Transactions([FromQuery] TransactionHistoryQueryDto query)
     {

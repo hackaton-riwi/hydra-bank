@@ -174,6 +174,13 @@ public class AccountService : IAccountService
         return Success("ACCOUNT_RECHARGED", "Cuenta recargada correctamente", BuildAccount(account));
     }
 
+    public async Task<object> GetMyAccountAsync()
+    {
+        var (tenantId, userId) = GetCurrentTenantUser();
+        var account = await GetOwnAccountAsync(tenantId, userId);
+        return Success("ACCOUNT_QUERIED", "Estado de la cuenta consultado correctamente", BuildAccount(account));
+    }
+
     public async Task<object> GetTransactionsAsync(TransactionHistoryQueryDto query)
     {
         var (tenantId, userId) = GetCurrentTenantUser();
