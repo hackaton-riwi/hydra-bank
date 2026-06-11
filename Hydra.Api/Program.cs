@@ -18,6 +18,7 @@ using System.Threading.RateLimiting;
 
 var builder = WebApplication.CreateBuilder(args);
 
+// 1. Nombre de política limpio y seguro
 const string CorsPolicyName = "AllowAll";
 
 builder.Services.AddControllers();
@@ -102,6 +103,7 @@ builder.Services.AddAuthentication(options =>
         };
     });
 builder.Services.AddAuthorization();
+
 builder.Services.AddRateLimiter(options =>
 {
     options.RejectionStatusCode = StatusCodes.Status429TooManyRequests;
@@ -154,13 +156,19 @@ if (swaggerEnabled)
 }
 
 app.UseHttpsRedirection();
-
 app.UseRouting();
+
+// 3. ORDEN DE MIDDLEWARES CORREGIDO:
+// CORS va de primero para responder las peticiones OPTIONS previas del navegador.
 app.UseCors(CorsPolicyName);
-app.UseAuthentication();
-app.UseAuthorization();
+
+// El Rate Limiter va antes de la Auth para mitigar ataques de fuerza bruta en el login de forma eficiente.
 app.UseRateLimiter();
 
+app.UseAuthentication();
+app.UseAuthorization();
+
+// Forzamos que los controladores requieran la política global de CORS
 app.MapControllers().RequireCors(CorsPolicyName);
 
 app.Run();
