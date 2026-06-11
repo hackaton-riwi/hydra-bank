@@ -1,7 +1,6 @@
 FROM mcr.microsoft.com/dotnet/sdk:10.0 AS build
 WORKDIR /src
 
-COPY Hydra.sln ./
 COPY Directory.Build.props ./
 
 COPY Hydra.Domain/Hydra.Domain.csproj Hydra.Domain/

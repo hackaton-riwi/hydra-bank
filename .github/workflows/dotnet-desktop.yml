@@ -1,0 +1,68 @@
+name: Deploy production
+
+on:
+  push:
+    branches:
+      - main
+
+permissions:
+  packages: write
+  contents: read
+
+jobs:
+  build-and-push:
+    runs-on: ubuntu-latest
+    environment: production
+
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Login to GitHub Container Registry
+        uses: docker/login-action@v3
+        with:
+          registry: ghcr.io
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Build Docker image
+        run: |
+          docker build \
+            -f Hydra.Api/Dockerfile \
+            -t ghcr.io/${{ github.repository }}:latest \
+            .
+
+      - name: Push Docker image
+        run: |
+          docker push ghcr.io/${{ github.repository }}:latest
+
+  deploy:
+    needs: build-and-push
+    runs-on: ubuntu-latest
+    environment: production
+
+    steps:
+      - name: Deploy to VPS
+        uses: appleboy/ssh-action@v1.0.3
+        with:
+          host: 95.111.229.119
+          username: root
+          key: ${{ secrets.SSH_KEY }}
+          port: 22
+          script: |
+            echo "Conexión exitosa al VPS"
+
+            echo "${{ secrets.GHCR_TOKEN }}" | docker login ghcr.io -u "${{ github.actor }}" --password-stdin
+
+            docker pull ghcr.io/${{ github.repository }}:latest
+
+            docker stop ${{ github.event.repository.name }} || true
+            docker rm ${{ github.event.repository.name }} || true
+
+            docker run -d \
+              --name ${{ github.event.repository.name }} \
+              --restart always \
+              -p 8092:8080 \
+              ghcr.io/${{ github.repository }}:latest
+
+            docker image prune -f
