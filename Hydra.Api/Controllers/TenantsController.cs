@@ -100,7 +100,7 @@ public class TenantsController : ControllerBase
             });
         }
 
-        var adminPassword = BuildAdminPassword();
+        var adminPassword = request.Password;
 
         if (!await _roleManager.RoleExistsAsync(TenantAdminRole))
         {
@@ -189,7 +189,6 @@ public class TenantsController : ControllerBase
                 bankAdmin.FullName,
                 bankAdmin.Email,
                 Role = bankAdmin.Role.ToString(),
-                temporaryPassword = adminPassword,
                 bankAdmin.CreatedAt
             }
         });
@@ -203,11 +202,6 @@ public class TenantsController : ControllerBase
         return string.IsNullOrWhiteSpace(slug)
             ? $"tenant-{Guid.NewGuid():N}"[..50]
             : slug.Length <= 50 ? slug : slug[..50].Trim('-');
-    }
-
-    private static string BuildAdminPassword()
-    {
-        return $"Admin{Guid.NewGuid():N}"[..12] + "a1";
     }
 
     private static string BuildTenantIdentityUserName(string tenantSlug, string email)

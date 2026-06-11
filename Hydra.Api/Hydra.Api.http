@@ -11,7 +11,8 @@ Content-Type: application/json
 
 {
   "nombreTenant": "Manhattan Trust Bank",
-  "correo": "admin@manhattan.test"
+  "correo": "admin@manhattan.test",
+  "password": "Admin123"
 }
 
 ###
