@@ -21,6 +21,8 @@ var builder = WebApplication.CreateBuilder(args);
 const string CorsPolicyName = "AllowAll";
 
 builder.Services.AddControllers();
+
+// 2. Un solo bloque de configuración de CORS
 builder.Services.AddCors(options =>
 {
     options.AddPolicy(CorsPolicyName, policy =>
@@ -153,12 +155,13 @@ if (swaggerEnabled)
 
 app.UseHttpsRedirection();
 
+app.UseRouting();
 app.UseCors(CorsPolicyName);
-app.UseRateLimiter();
 app.UseAuthentication();
 app.UseAuthorization();
+app.UseRateLimiter();
 
-app.MapControllers();
+app.MapControllers().RequireCors(CorsPolicyName);
 
 app.Run();
 
