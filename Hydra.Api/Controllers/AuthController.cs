@@ -8,6 +8,7 @@ using Microsoft.EntityFrameworkCore;
 using Microsoft.IdentityModel.Tokens;
 using System.IdentityModel.Tokens.Jwt;
 using System.Security.Claims;
+using System.Text.Json;
 using System.Text;
 using BankUser = Hydra.Domain.Entities.User;
 using Hydra.Domain.Enums;
@@ -118,6 +119,26 @@ public class AuthController : ControllerBase
 
         _dbContext.BankUsers.Add(bankUser);
         _dbContext.Accounts.Add(account);
+        _dbContext.AuditLogs.Add(new Hydra.Domain.Entities.AuditLog
+        {
+            Id = Guid.NewGuid(),
+            TenantId = tenant.Id,
+            UserId = bankUser.Id,
+            Action = "CLIENT_REGISTERED",
+            OldValue = null,
+            NewValue = JsonSerializer.Serialize(new
+            {
+                UserId = bankUser.Id,
+                ShortId = BuildShortId("USR", bankUser.Id),
+                bankUser.FullName,
+                bankUser.DocumentNumber,
+                bankUser.Email,
+                AccountId = account.Id,
+                AccountShortId = BuildShortId("ACC", account.Id),
+                account.AccountNumber
+            }),
+            CreatedAt = now
+        });
         await _dbContext.SaveChangesAsync();
 
         var identityResult = await _userManager.CreateAsync(identityUser, request.Password);
@@ -321,9 +342,8 @@ public class AuthController : ControllerBase
             description = "Cliente registrado correctamente. Debe iniciar sesión para obtener token.",
             user = new
             {
-                identityUserId = user.Id,
-                userId = bankUser.Id,
-                bankUser.TenantId,
+                id = BuildShortId("USR", bankUser.Id),
+                tenantId = BuildShortId("TEN", bankUser.TenantId),
                 bankUser.FullName,
                 bankUser.DocumentNumber,
                 bankUser.Email,
@@ -340,9 +360,8 @@ public class AuthController : ControllerBase
     {
         return new
         {
-            identityUserId = user.Id,
-            userId = bankUser?.Id.ToString() ?? user.Id,
-            tenantId = bankUser?.TenantId,
+            id = bankUser is null ? user.Id[..Math.Min(user.Id.Length, 8)].ToUpperInvariant() : BuildShortId("USR", bankUser.Id),
+            tenantId = bankUser is null ? null : BuildShortId("TEN", bankUser.TenantId),
             fullName = bankUser?.FullName,
             documentNumber = bankUser?.DocumentNumber,
             email = user.Email,
@@ -355,9 +374,9 @@ public class AuthController : ControllerBase
     {
         return new
         {
-            account.Id,
+            id = BuildShortId("ACC", account.Id),
             account.AccountNumber,
-            account.OwnerId,
+            ownerId = BuildShortId("USR", account.OwnerId),
             account.Balance,
             account.Currency,
             Status = account.Status.ToString(),
@@ -391,6 +410,11 @@ public class AuthController : ControllerBase
     private static string GenerateAccountNumber()
     {
         return DateTime.UtcNow.Ticks.ToString()[^10..];
+    }
+
+    private static string BuildShortId(string prefix, Guid id)
+    {
+        return $"{prefix}-{id.ToString("N")[..8].ToUpperInvariant()}";
     }
 
     private static string BuildTenantIdentityUserName(string tenantSlug, string email)

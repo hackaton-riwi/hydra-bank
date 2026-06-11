@@ -1,4 +1,5 @@
 using System.Security.Claims;
+using System.Text.Json;
 using Hydra.Application.DTOs;
 using Hydra.Application.Interfaces;
 using Hydra.Domain.Entities;
@@ -63,13 +64,32 @@ public class AccountService : IAccountService
         };
 
         _dbContext.Accounts.Add(account);
+        _dbContext.AuditLogs.Add(new AuditLog
+        {
+            Id = Guid.NewGuid(),
+            TenantId = tenantId,
+            UserId = userId,
+            Action = "ACCOUNT_CREATED",
+            OldValue = null,
+            NewValue = JsonSerializer.Serialize(new
+            {
+                AccountId = account.Id,
+                AccountShortId = BuildShortId("ACC", account.Id),
+                account.AccountNumber,
+                account.OwnerId,
+                OwnerShortId = BuildShortId("USR", account.OwnerId),
+                account.Balance,
+                account.Currency
+            }),
+            CreatedAt = now
+        });
         await _dbContext.SaveChangesAsync();
 
         return Success("ACCOUNT_CREATED", "Cuenta creada correctamente", new
         {
-            account.Id,
+            id = BuildShortId("ACC", account.Id),
             account.AccountNumber,
-            account.OwnerId,
+            ownerId = BuildShortId("USR", account.OwnerId),
             owner.FullName,
             owner.DocumentNumber,
             account.Balance,
@@ -79,9 +99,10 @@ public class AccountService : IAccountService
         });
     }
 
-    public async Task<object> DeactivateAsync(Guid accountId)
+    public async Task<object> DeactivateAsync(string accountKey)
     {
         var (tenantId, userId) = GetCurrentTenantUser();
+        var accountId = await ResolveAccountIdAsync(tenantId, accountKey);
         var account = await GetOwnAccountAsync(tenantId, userId, accountId);
 
         if (account.Status != AccountStatus.ACTIVE)
@@ -90,6 +111,25 @@ public class AccountService : IAccountService
         account.Status = AccountStatus.INACTIVE;
         account.DeactivatedAt = DateTime.UtcNow;
         account.UpdatedAt = DateTime.UtcNow;
+        _dbContext.AuditLogs.Add(new AuditLog
+        {
+            Id = Guid.NewGuid(),
+            TenantId = tenantId,
+            UserId = userId,
+            Action = "ACCOUNT_DEACTIVATED",
+            OldValue = JsonSerializer.Serialize(new
+            {
+                AccountId = account.Id,
+                Status = AccountStatus.ACTIVE.ToString()
+            }),
+            NewValue = JsonSerializer.Serialize(new
+            {
+                AccountId = account.Id,
+                Status = account.Status.ToString(),
+                account.DeactivatedAt
+            }),
+            CreatedAt = account.UpdatedAt
+        });
 
         await _dbContext.SaveChangesAsync();
 
@@ -106,8 +146,28 @@ public class AccountService : IAccountService
         if (account.Status != AccountStatus.ACTIVE)
             throw new InvalidOperationException("Solo se puede recargar una cuenta activa");
 
+        var previousBalance = account.Balance;
         account.Balance = RoundMoney(account.Balance + request.Amount);
         account.UpdatedAt = DateTime.UtcNow;
+        _dbContext.AuditLogs.Add(new AuditLog
+        {
+            Id = Guid.NewGuid(),
+            TenantId = tenantId,
+            UserId = userId,
+            Action = "ACCOUNT_RECHARGED",
+            OldValue = JsonSerializer.Serialize(new
+            {
+                AccountId = account.Id,
+                PreviousBalance = previousBalance
+            }),
+            NewValue = JsonSerializer.Serialize(new
+            {
+                AccountId = account.Id,
+                Amount = request.Amount,
+                Balance = account.Balance
+            }),
+            CreatedAt = account.UpdatedAt
+        });
 
         await _dbContext.SaveChangesAsync();
 
@@ -140,12 +200,12 @@ public class AccountService : IAccountService
             .Take(limit)
             .Select(x => new
             {
-                x.Id,
+                id = BuildShortId("TRX", x.Id),
                 Type = x.Type.ToString(),
                 x.OriginalAmount,
                 x.FeeAmount,
-                x.SourceAccountId,
-                x.DestinationAccountId,
+                sourceAccountId = x.SourceAccountId == null ? null : BuildShortId("ACC", x.SourceAccountId.Value),
+                destinationAccountId = x.DestinationAccountId == null ? null : BuildShortId("ACC", x.DestinationAccountId.Value),
                 Status = x.Status.ToString(),
                 x.CreatedAt
             })
@@ -195,7 +255,7 @@ public class AccountService : IAccountService
     {
         var context = _httpContextAccessor.HttpContext;
         var idempotencyKey = context?.Request.Headers["Idempotency-Key"].FirstOrDefault()
-            ?? throw new InvalidOperationException("Header Idempotency-Key requerido");
+            ?? Guid.NewGuid().ToString();
 
         var correlationId = context?.Request.Headers["X-Correlation-ID"].FirstOrDefault()
             ?? Guid.NewGuid().ToString();
@@ -215,6 +275,39 @@ public class AccountService : IAccountService
             .Include(x => x.User)
             .SingleOrDefaultAsync(x => x.TenantId == tenantId && x.Id == accountId && x.OwnerId == userId)
             ?? throw new InvalidOperationException("Cuenta no encontrada para el cliente autenticado");
+    }
+
+    private async Task<Guid> ResolveAccountIdAsync(Guid tenantId, string accountKey)
+    {
+        var normalized = accountKey.Trim();
+
+        if (Guid.TryParse(normalized, out var accountId))
+            return accountId;
+
+        var shortCode = normalized.ToUpperInvariant();
+        const string prefix = "ACC-";
+        if (shortCode.StartsWith(prefix, StringComparison.Ordinal))
+            shortCode = shortCode[prefix.Length..];
+
+        if (shortCode.Length < 8)
+            throw new InvalidOperationException("El id de cuenta debe ser un GUID o un codigo corto tipo ACC-1234ABCD");
+
+        var accounts = await _dbContext.Accounts
+            .AsNoTracking()
+            .Where(account => account.TenantId == tenantId)
+            .Select(account => account.Id)
+            .ToListAsync();
+
+        var matches = accounts
+            .Where(id => id.ToString("N").StartsWith(shortCode, StringComparison.OrdinalIgnoreCase))
+            .ToList();
+
+        return matches.Count switch
+        {
+            1 => matches[0],
+            0 => throw new InvalidOperationException("Cuenta no encontrada con ese codigo corto"),
+            _ => throw new InvalidOperationException("El codigo corto de cuenta es ambiguo; usa mas caracteres del GUID")
+        };
     }
 
     private async Task<Account> GetOwnAccountAsync(Guid tenantId, Guid userId)
@@ -260,9 +353,9 @@ public class AccountService : IAccountService
     {
         return new
         {
-            account.Id,
+            id = BuildShortId("ACC", account.Id),
             account.AccountNumber,
-            account.OwnerId,
+            ownerId = BuildShortId("USR", account.OwnerId),
             account.User.FullName,
             account.User.DocumentNumber,
             account.Balance,
@@ -283,6 +376,11 @@ public class AccountService : IAccountService
             description,
             data
         };
+    }
+
+    private static string BuildShortId(string prefix, Guid id)
+    {
+        return $"{prefix}-{id.ToString("N")[..8].ToUpperInvariant()}";
     }
 
 }

@@ -1,4 +1,5 @@
 using System.ComponentModel.DataAnnotations;
+using System.Text.Json.Serialization;
 
 namespace Hydra.Application.DTOs;
 
@@ -27,25 +28,27 @@ public class TransferRequestDto
 /// </summary>
 public class TransferResponseDto
 {
-    /// <summary>
-    /// The transaction ID
-    /// </summary>
+    public string Id => TransactionShortId;
+
+    [JsonIgnore]
     public Guid TransactionId { get; set; }
+
+    public string TransactionShortId { get; set; } = string.Empty;
 
     /// <summary>
     /// The status of the transaction
     /// </summary>
     public string Status { get; set; } = string.Empty;
 
-    /// <summary>
-    /// The source account ID
-    /// </summary>
+    [JsonIgnore]
     public Guid SourceAccountId { get; set; }
 
-    /// <summary>
-    /// The destination account ID
-    /// </summary>
+    public string SourceAccountShortId { get; set; } = string.Empty;
+
+    [JsonIgnore]
     public Guid DestinationAccountId { get; set; }
+
+    public string DestinationAccountShortId { get; set; } = string.Empty;
 
     /// <summary>
     /// The destination document number

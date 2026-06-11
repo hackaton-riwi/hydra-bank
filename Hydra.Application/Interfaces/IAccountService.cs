@@ -6,7 +6,7 @@ public interface IAccountService
 {
     Task<object> CreateAsync(CreateAccountDto request);
 
-    Task<object> DeactivateAsync(Guid accountId);
+    Task<object> DeactivateAsync(string accountKey);
 
     Task<object> RechargeAsync(RechargeAccountDto request);
 

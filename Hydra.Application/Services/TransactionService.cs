@@ -155,9 +155,12 @@ public class TransactionService : ITransactionService
             var response = new TransferResponseDto
             {
                 TransactionId = transaction.Id,
+                TransactionShortId = BuildShortId("TRX", transaction.Id),
                 Status = transaction.Status.ToString(),
                 SourceAccountId = source.Id,
+                SourceAccountShortId = BuildShortId("ACC", source.Id),
                 DestinationAccountId = destination.Id,
+                DestinationAccountShortId = BuildShortId("ACC", destination.Id),
                 DestinationDocumentNumber = destination.User.DocumentNumber,
                 Amount = request.Amount,
                 FeeAmount = fee,
@@ -239,10 +242,11 @@ public class TransactionService : ITransactionService
             if (request.Amount > tenant.MaxTransactionAmount)
                 throw new InvalidOperationException($"El monto excede el maximo permitido de {tenant.MaxTransactionAmount}");
 
+            var destinationAccountId = await ResolveAccountIdAsync(tenantId, request.DestinationAccountId);
             var account = await _db.Accounts
                 .SingleOrDefaultAsync(x =>
                     x.TenantId == tenantId &&
-                    x.Id == request.DestinationAccountId)
+                    x.Id == destinationAccountId)
                 ?? throw new InvalidOperationException("Cuenta destino no encontrada");
 
             if (account.Status != AccountStatus.ACTIVE)
@@ -305,9 +309,14 @@ public class TransactionService : ITransactionService
             var response = new DepositResponseDto
             {
                 TransactionId = transaction.Id,
+                TransactionShortId = BuildShortId("TRX", transaction.Id),
                 Status = transaction.Status.ToString(),
+                DestinationAccountShortId = BuildShortId("ACC", account.Id),
+                DestinationAccountInternalId = account.Id,
                 OriginalAmount = request.Amount,
                 FeeAmount = fee,
+                NetAmount = netAmount,
+                DestinationBalance = account.Balance,
                 CreatedAt = now
             };
 
@@ -382,10 +391,11 @@ public class TransactionService : ITransactionService
             if (request.Amount > tenant.MaxTransactionAmount)
                 throw new InvalidOperationException($"El monto excede el maximo permitido de {tenant.MaxTransactionAmount}");
 
+            var sourceAccountId = await ResolveAccountIdAsync(tenantId, request.SourceAccountId);
             var account = await _db.Accounts
                 .SingleOrDefaultAsync(x =>
                     x.TenantId == tenantId &&
-                    x.Id == request.SourceAccountId &&
+                    x.Id == sourceAccountId &&
                     x.OwnerId == userId)
                 ?? throw new InvalidOperationException("Cuenta origen no encontrada");
 
@@ -449,9 +459,14 @@ public class TransactionService : ITransactionService
             var response = new WithdrawResponseDto
             {
                 TransactionId = transaction.Id,
+                TransactionShortId = BuildShortId("TRX", transaction.Id),
                 Status = transaction.Status.ToString(),
+                SourceAccountShortId = BuildShortId("ACC", account.Id),
+                SourceAccountInternalId = account.Id,
                 OriginalAmount = request.Amount,
                 FeeAmount = fee,
+                TotalDebit = totalDebit,
+                SourceBalance = account.Balance,
                 CreatedAt = now
             };
 
@@ -511,5 +526,43 @@ public class TransactionService : ITransactionService
     private static string NormalizeDocumentNumber(string documentNumber)
     {
         return documentNumber.Trim().ToUpperInvariant();
+    }
+
+    private async Task<Guid> ResolveAccountIdAsync(Guid tenantId, string accountKey)
+    {
+        var normalized = accountKey.Trim();
+
+        if (Guid.TryParse(normalized, out var accountId))
+            return accountId;
+
+        var shortCode = normalized.ToUpperInvariant();
+        const string prefix = "ACC-";
+        if (shortCode.StartsWith(prefix, StringComparison.Ordinal))
+            shortCode = shortCode[prefix.Length..];
+
+        if (shortCode.Length < 8)
+            throw new InvalidOperationException("El id de cuenta debe ser un GUID o un codigo corto tipo ACC-1234ABCD");
+
+        var accounts = await _db.Accounts
+            .AsNoTracking()
+            .Where(account => account.TenantId == tenantId)
+            .Select(account => account.Id)
+            .ToListAsync();
+
+        var matches = accounts
+            .Where(id => id.ToString("N").StartsWith(shortCode, StringComparison.OrdinalIgnoreCase))
+            .ToList();
+
+        return matches.Count switch
+        {
+            1 => matches[0],
+            0 => throw new InvalidOperationException("Cuenta no encontrada con ese codigo corto"),
+            _ => throw new InvalidOperationException("El codigo corto de cuenta es ambiguo; usa mas caracteres del GUID")
+        };
+    }
+
+    private static string BuildShortId(string prefix, Guid id)
+    {
+        return $"{prefix}-{id.ToString("N")[..8].ToUpperInvariant()}";
     }
 }

@@ -38,12 +38,12 @@ public class AccountsController : ControllerBase
         }
     }
 
-    [HttpDelete("{accountId:guid}")]
-    public async Task<IActionResult> Deactivate(Guid accountId)
+    [HttpDelete("{accountKey}")]
+    public async Task<IActionResult> Deactivate(string accountKey)
     {
         try
         {
-            return Ok(await _accountService.DeactivateAsync(accountId));
+            return Ok(await _accountService.DeactivateAsync(accountKey));
         }
         catch (Exception exception)
         {

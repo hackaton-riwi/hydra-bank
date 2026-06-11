@@ -1,4 +1,5 @@
 using System.ComponentModel.DataAnnotations;
+using System.Text.Json.Serialization;
 
 namespace Hydra.Application.DTOs;
 
@@ -8,10 +9,10 @@ namespace Hydra.Application.DTOs;
 public class WithdrawRequestDto
 {
     /// <summary>
-    /// The source account ID (from which funds are withdrawn)
+    /// The source account ID or short ID, for example ACC-1234ABCD
     /// </summary>
     [Required]
-    public Guid SourceAccountId { get; set; }
+    public string SourceAccountId { get; set; } = string.Empty;
 
     /// <summary>
     /// The amount to withdraw
@@ -26,10 +27,17 @@ public class WithdrawRequestDto
 /// </summary>
 public class WithdrawResponseDto
 {
-    /// <summary>
-    /// The transaction ID
-    /// </summary>
+    public string Id => TransactionShortId;
+
+    [JsonIgnore]
     public Guid TransactionId { get; set; }
+
+    public string TransactionShortId { get; set; } = string.Empty;
+
+    public string SourceAccountShortId { get; set; } = string.Empty;
+
+    [JsonIgnore]
+    public Guid SourceAccountInternalId { get; set; }
 
     /// <summary>
     /// The status of the transaction
@@ -45,6 +53,10 @@ public class WithdrawResponseDto
     /// The fee amount applied
     /// </summary>
     public decimal FeeAmount { get; set; }
+
+    public decimal TotalDebit { get; set; }
+
+    public decimal SourceBalance { get; set; }
 
     /// <summary>
     /// The timestamp when the transaction was created
