@@ -8,5 +8,5 @@
 **/.env
 **/.env.*
 
-Hydra.Infrastructure/DOC
+doc/
 Hydra.Api/appsettings.json.bak

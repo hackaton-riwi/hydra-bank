@@ -1,4 +1,15 @@
 <Solution>
+  <Folder Name="/doc/">
+    <File Path="doc/API.md" />
+    <File Path="doc/ARCHITECTURE.md" />
+    <File Path="doc/AUDITORIA.md" />
+    <File Path="doc/DATABASE.md" />
+    <File Path="doc/InitialCreate.sql" />
+    <File Path="doc/QA.md" />
+    <File Path="doc/account-flow.md" />
+    <File Path="doc/diagram.png" />
+    <File Path="doc/script.sql" />
+  </Folder>
   <Project Path="Hydra.Api/Hydra.Api.csproj" />
   <Project Path="Hydra.Application/Hydra.Application.csproj" />
   <Project Path="Hydra.Domain/Hydra.Domain.csproj" />
