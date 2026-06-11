@@ -141,6 +141,18 @@ builder.Services.AddSingleton<IConnectionMultiplexer>(_ =>
 builder.Services.AddScoped<IIdempotencyService, IdempotencyService>();
 builder.Services.AddScoped<ITransactionService, TransactionService>();
 
+builder.Services.AddHttpClient<IWebhookNotifier, WebhookNotifier>();
+
+builder.Services.AddCors(options =>
+{
+    options.AddDefaultPolicy(policy =>
+    {
+        policy.AllowAnyOrigin()
+              .AllowAnyHeader()
+              .AllowAnyMethod();
+    });
+});
+
 var app = builder.Build();
 
 await SeedIdentityRolesAsync(app);
@@ -162,7 +174,8 @@ app.UseRouting();
 // CORS va de primero para responder las peticiones OPTIONS previas del navegador.
 app.UseCors(CorsPolicyName);
 
-// El Rate Limiter va antes de la Auth para mitigar ataques de fuerza bruta en el login de forma eficiente.
+app.UseCors();
+
 app.UseRateLimiter();
 
 app.UseAuthentication();

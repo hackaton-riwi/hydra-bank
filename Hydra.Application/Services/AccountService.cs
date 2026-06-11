@@ -15,13 +15,16 @@ public class AccountService : IAccountService
 
     private readonly BankOsDbContext _dbContext;
     private readonly IHttpContextAccessor _httpContextAccessor;
+    private readonly ITransactionService _transactionService;
 
     public AccountService(
         BankOsDbContext dbContext,
-        IHttpContextAccessor httpContextAccessor)
+        IHttpContextAccessor httpContextAccessor,
+        ITransactionService transactionService)
     {
         _dbContext = dbContext;
         _httpContextAccessor = httpContextAccessor;
+        _transactionService = transactionService;
     }
 
     public async Task<object> CreateAsync(CreateAccountDto request)
@@ -155,6 +158,55 @@ public class AccountService : IAccountService
             total,
             items
         });
+    }
+
+    public async Task<TransferResponseDto> TransferAsync(TransferRequestDto dto)
+    {
+        var (tenantId, userId) = GetCurrentTenantUser();
+        var headers = GetRequestHeaders();
+        var result = await _transactionService.TransferAsync(tenantId, userId, dto, headers.idempotencyKey, headers.correlationId);
+        _lastCorrelationId = headers.correlationId;
+        return result;
+    }
+
+    public async Task<DepositResponseDto> DepositAsync(DepositRequestDto dto)
+    {
+        var (tenantId, userId) = GetCurrentTenantUser();
+        var headers = GetRequestHeaders();
+        var result = await _transactionService.DepositAsync(tenantId, userId, dto, headers.idempotencyKey, headers.correlationId);
+        _lastCorrelationId = headers.correlationId;
+        return result;
+    }
+
+    public async Task<WithdrawResponseDto> WithdrawAsync(WithdrawRequestDto dto)
+    {
+        var (tenantId, userId) = GetCurrentTenantUser();
+        var headers = GetRequestHeaders();
+        var result = await _transactionService.WithdrawAsync(tenantId, userId, dto, headers.idempotencyKey, headers.correlationId);
+        _lastCorrelationId = headers.correlationId;
+        return result;
+    }
+
+    private string _lastCorrelationId = string.Empty;
+
+    public string GetLastCorrelationId() => _lastCorrelationId;
+
+    private (string idempotencyKey, string correlationId) GetRequestHeaders()
+    {
+        var context = _httpContextAccessor.HttpContext;
+        var idempotencyKey = context?.Request.Headers["Idempotency-Key"].FirstOrDefault()
+            ?? throw new InvalidOperationException("Header Idempotency-Key requerido");
+
+        var correlationId = context?.Request.Headers["X-Correlation-ID"].FirstOrDefault()
+            ?? Guid.NewGuid().ToString();
+
+        if (!Guid.TryParse(idempotencyKey, out _))
+            throw new InvalidOperationException("Header Idempotency-Key debe ser un UUID");
+
+        if (!Guid.TryParse(correlationId, out _))
+            throw new InvalidOperationException("Header X-Correlation-ID debe ser un UUID");
+
+        return (idempotencyKey, correlationId);
     }
 
     private async Task<Account> GetOwnAccountAsync(Guid tenantId, Guid userId, Guid accountId)
