@@ -25,7 +25,7 @@ builder.Services.AddCors(options =>
             .AllowAnyHeader());
 });
 
-const string CorsPolicyName = "AllowAll";
+const string CorsPolicyName = "AllowFrontendClients";
 
 builder.Services.AddControllers();
 builder.Services.AddCors(options =>
@@ -160,12 +160,13 @@ if (swaggerEnabled)
 
 app.UseHttpsRedirection();
 
+app.UseRouting();
 app.UseCors(CorsPolicyName);
-app.UseRateLimiter();
 app.UseAuthentication();
 app.UseAuthorization();
+app.UseRateLimiter();
 
-app.MapControllers();
+app.MapControllers().RequireCors(CorsPolicyName);
 
 app.Run();
 
