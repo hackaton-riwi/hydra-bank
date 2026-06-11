@@ -66,7 +66,7 @@ public class AccountsController : ControllerBase
         }
     }
 
-    [HttpGet("me")]
+    [HttpGet("test")]
     public async Task<IActionResult> GetMyAccount()
     {
         try
