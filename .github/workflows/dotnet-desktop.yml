@@ -62,5 +62,5 @@ jobs:
             docker run -d \
               --name ${{ github.event.repository.name }} \
               --restart always \
-              -p 8080:8080 \
+              -p 8092:8080 \
               ghcr.io/${{ github.repository }}:latest
