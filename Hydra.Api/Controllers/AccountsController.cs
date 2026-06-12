@@ -40,6 +40,7 @@ public class AccountsController : ControllerBase
         }
     }
 
+    /*
     [HttpDelete("{accountKey}")]
     public async Task<IActionResult> Deactivate(string accountKey)
     {
@@ -52,6 +53,7 @@ public class AccountsController : ControllerBase
             return BadRequest(Error("ACCOUNT_DEACTIVATE_FAILED", exception.Message));
         }
     }
+    */
 
     [HttpPost("recharge")]
     public async Task<IActionResult> Recharge([FromBody] RechargeAccountDto request)
