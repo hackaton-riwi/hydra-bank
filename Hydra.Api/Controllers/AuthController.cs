@@ -431,11 +431,10 @@ public class AuthController : ControllerBase
     {
         return new
         {
-            id = BuildShortId("ACC", account.Id),
+            account.Id,
             account.AccountNumber,
-            ownerId = BuildShortId("USR", account.OwnerId),
+            account.OwnerId,
             account.Balance,
-            account.Currency,
             Status = account.Status.ToString(),
             account.CreatedAt
         };
