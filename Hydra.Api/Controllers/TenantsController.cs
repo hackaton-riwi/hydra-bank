@@ -427,6 +427,98 @@ public class TenantsController : ControllerBase
             : GetAuditLogs(tenantId, limit, offset);
     }
 
+    [HttpGet("current/dashboard")]
+    [Authorize(Roles = "ADMIN,SUPERADMIN")]
+    public async Task<IActionResult> GetDashboard()
+    {
+        var tenantIdClaim = User.FindFirst("tenant_id")?.Value;
+        if (string.IsNullOrWhiteSpace(tenantIdClaim) || !Guid.TryParse(tenantIdClaim, out var tenantId))
+            return Unauthorized(Error("TENANT_REQUIRED", "El token no contiene tenant_id válido"));
+
+        if (!CanAccessTenant(tenantId))
+            return Forbid();
+
+        var tenant = await _dbContext.Tenants
+            .AsNoTracking()
+            .SingleOrDefaultAsync(t => t.Id == tenantId);
+
+        if (tenant is null)
+            return NotFound(Error("TENANT_NOT_FOUND", "Tenant no encontrado"));
+
+        var users = await _dbContext.BankUsers
+            .AsNoTracking()
+            .Where(u => u.TenantId == tenantId)
+            .OrderBy(u => u.FullName)
+            .Select(u => new
+            {
+                id = BuildShortId("USR", u.Id),
+                u.FullName,
+                u.DocumentNumber,
+                u.Email,
+                Role = u.Role.ToString(),
+                u.CreatedAt,
+                Accounts = u.Accounts.Select(a => new
+                {
+                    id = BuildShortId("ACC", a.Id),
+                    a.AccountNumber,
+                    a.Balance,
+                    a.Currency,
+                    Status = a.Status.ToString(),
+                    a.CreatedAt
+                })
+            })
+            .ToListAsync();
+
+        var accounts = await _dbContext.Accounts
+            .AsNoTracking()
+            .Where(a => a.TenantId == tenantId)
+            .ToListAsync();
+
+        var totalBalance = accounts.Sum(a => a.Balance);
+
+        var transactions = await _dbContext.Transactions
+            .AsNoTracking()
+            .Where(t => t.TenantId == tenantId)
+            .OrderByDescending(t => t.CreatedAt)
+            .Take(20)
+            .Select(t => new
+            {
+                id = BuildShortId("TRX", t.Id),
+                UserName = t.User.FullName,
+                Type = t.Type.ToString(),
+                t.OriginalAmount,
+                t.FeeAmount,
+                Status = t.Status.ToString(),
+                t.CreatedAt
+            })
+            .ToListAsync();
+
+        var auditLogs = await _dbContext.AuditLogs
+            .AsNoTracking()
+            .Where(l => l.TenantId == tenantId)
+            .OrderByDescending(l => l.CreatedAt)
+            .Take(20)
+            .Select(l => new
+            {
+                id = BuildShortId("LOG", l.Id),
+                UserName = l.User.FullName,
+                l.Action,
+                l.CreatedAt
+            })
+            .ToListAsync();
+
+        return Ok(new
+        {
+            tenant = BuildTenantSummary(tenant),
+            totalUsers = users.Count,
+            totalAccounts = accounts.Count,
+            totalActiveAccounts = accounts.Count(a => a.Status.ToString() == "ACTIVE"),
+            totalBalance,
+            transactions,
+            auditLogs
+        });
+    }
+
     [HttpDelete("{tenantKey}")]
     [Authorize(Roles = "SUPERADMIN")]
     public async Task<IActionResult> Delete(string tenantKey)
