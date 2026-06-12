@@ -16,6 +16,7 @@ using System.Text;
 using System.Threading.Tasks;
 using BankUser = Hydra.Domain.Entities.User;
 using Hydra.Domain.Enums;
+using Microsoft.Extensions.Caching.Distributed;
 using Microsoft.Extensions.Configuration;
 
 namespace Hydra.Api.Controllers;
@@ -35,19 +36,22 @@ public class AuthController : ControllerBase
     private readonly BankOsDbContext _dbContext;
     private readonly IConfiguration _configuration;
     private readonly IPasswordHasher<BankUser> _passwordHasher;
+    private readonly IDistributedCache _cache;
 
     public AuthController(
         UserManager<IdentityUser> userManager,
         RoleManager<IdentityRole> roleManager,
         BankOsDbContext dbContext,
         IConfiguration configuration,
-        IPasswordHasher<BankUser> passwordHasher)
+        IPasswordHasher<BankUser> passwordHasher,
+        IDistributedCache cache)
     {
         _userManager = userManager;
         _roleManager = roleManager;
         _dbContext = dbContext;
         _configuration = configuration;
         _passwordHasher = passwordHasher;
+        _cache = cache;
     }
 
     [HttpPost("register")]
@@ -251,6 +255,42 @@ public class AuthController : ControllerBase
         });
     }
 
+    [HttpPost("logout")]
+    [Authorize]
+    public async Task<IActionResult> Logout()
+    {
+        var jti = User.FindFirstValue(JwtRegisteredClaimNames.Jti);
+        var expiresAt = GetTokenExpiresAt();
+
+        if (string.IsNullOrWhiteSpace(jti) || expiresAt is null)
+        {
+            return Unauthorized(Error("INVALID_TOKEN", "Token inválido"));
+        }
+
+        var timeToLive = expiresAt.Value - DateTime.UtcNow;
+
+        if (timeToLive > TimeSpan.Zero)
+        {
+            await _cache.SetStringAsync(
+                BuildRevokedTokenCacheKey(jti),
+                "revoked",
+                new DistributedCacheEntryOptions
+                {
+                    AbsoluteExpirationRelativeToNow = timeToLive
+                });
+        }
+
+        DeleteAuthCookies();
+
+        return Ok(new
+        {
+            success = true,
+            code = "LOGOUT_SUCCESS",
+            description = "Sesión cerrada correctamente",
+            clearClientToken = true
+        });
+    }
+
     private async Task EnsureDefaultRolesExist()
     {
         foreach (var roleName in new[] { SuperAdminRole, AdminRole, ClientRole })
@@ -316,6 +356,18 @@ public class AuthController : ControllerBase
         return int.TryParse(_configuration["Jwt:ExpireMinutes"], out var minutes)
             ? minutes
             : 60;
+    }
+
+    private DateTime? GetTokenExpiresAt()
+    {
+        var exp = User.FindFirstValue(JwtRegisteredClaimNames.Exp);
+
+        if (!long.TryParse(exp, out var unixSeconds))
+        {
+            return null;
+        }
+
+        return DateTimeOffset.FromUnixTimeSeconds(unixSeconds).UtcDateTime;
     }
 
     private static object BuildAuthResponse(
@@ -425,6 +477,19 @@ public class AuthController : ControllerBase
     private static string BuildTenantIdentityUserName(string tenantSlug, string email)
     {
         return $"{tenantSlug}:{email}";
+    }
+
+    private void DeleteAuthCookies()
+    {
+        foreach (var cookieName in new[] { "token", "access_token", "Authorization" })
+        {
+            Response.Cookies.Delete(cookieName);
+        }
+    }
+
+    private static string BuildRevokedTokenCacheKey(string jti)
+    {
+        return $"revoked-token:{jti}";
     }
 
     private static object Error(string code, string description)

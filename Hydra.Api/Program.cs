@@ -14,12 +14,14 @@ using Microsoft.EntityFrameworkCore;
 using Microsoft.IdentityModel.Tokens;
 using Microsoft.OpenApi;
 using StackExchange.Redis;
+using System.IdentityModel.Tokens.Jwt;
 using System.Security.Claims;
 using System.Text;
 using BankUser = Hydra.Domain.Entities.User;
 using System.Threading.RateLimiting;
 using System.Threading.Tasks;
 using Microsoft.AspNetCore.Builder;
+using Microsoft.Extensions.Caching.Distributed;
 using Microsoft.AspNetCore.Http;
 using Microsoft.Extensions.Configuration;
 using Microsoft.Extensions.DependencyInjection;
@@ -109,6 +111,27 @@ builder.Services.AddAuthentication(options =>
                 Encoding.UTF8.GetBytes(jwtKey!)),
             NameClaimType = ClaimTypes.NameIdentifier,
             RoleClaimType = ClaimTypes.Role
+        };
+
+        options.Events = new JwtBearerEvents
+        {
+            OnTokenValidated = async context =>
+            {
+                var jti = context.Principal?.FindFirstValue(JwtRegisteredClaimNames.Jti);
+
+                if (string.IsNullOrWhiteSpace(jti))
+                {
+                    return;
+                }
+
+                var cache = context.HttpContext.RequestServices.GetRequiredService<IDistributedCache>();
+                var revokedToken = await cache.GetStringAsync(BuildRevokedTokenCacheKey(jti));
+
+                if (revokedToken is not null)
+                {
+                    context.Fail("Token revocado");
+                }
+            }
         };
     });
 builder.Services.AddAuthorization();
@@ -319,4 +342,9 @@ static string GetRateLimitPartitionKey(HttpContext httpContext)
     }
 
     return $"ip:{httpContext.Connection.RemoteIpAddress?.ToString() ?? "unknown"}";
+}
+
+static string BuildRevokedTokenCacheKey(string jti)
+{
+    return $"revoked-token:{jti}";
 }
