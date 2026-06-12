@@ -12,7 +12,7 @@ public interface IAccountService
 
     Task<object> GetMyAccountAsync();
 
-    Task<object> GetTransactionsAsync(TransactionHistoryQueryDto query);
+    Task<object> GetTransactionsAsync();
 
     Task<TransferResponseDto> TransferAsync(TransferRequestDto dto);
 

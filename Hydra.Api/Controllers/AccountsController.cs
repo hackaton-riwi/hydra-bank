@@ -2,9 +2,11 @@ using System;
 using System.Threading.Tasks;
 using Hydra.Application.DTOs;
 using Hydra.Application.Interfaces;
+using Hydra.Domain.Exceptions;
 using Microsoft.AspNetCore.Authorization;
 using Microsoft.AspNetCore.Mvc;
 using Microsoft.AspNetCore.RateLimiting;
+using Microsoft.EntityFrameworkCore;
 
 namespace Hydra.Api.Controllers;
 
@@ -86,9 +88,9 @@ public class AccountsController : ControllerBase
     }
 
     [HttpGet("transactions")]
-    public async Task<IActionResult> Transactions([FromQuery] TransactionHistoryQueryDto query)
+    public async Task<IActionResult> Transactions()
     {
-        return Ok(await _accountService.GetTransactionsAsync(query));
+        return Ok(await _accountService.GetTransactionsAsync());
     }
 
     [HttpPost("transfer")]
@@ -104,9 +106,21 @@ public class AccountsController : ControllerBase
         {
             return StatusCode(423, Error("IDEMPOTENCY_CONFLICT", ex.Message));
         }
+        catch (TransactionInProgressException ex)
+        {
+            return StatusCode(423, Error("IDEMPOTENCY_CONFLICT", ex.Message));
+        }
         catch (InvalidOperationException ex)
         {
             return BadRequest(Error("TRANSFER_FAILED", ex.Message));
+        }
+        catch (DbUpdateException ex)
+        {
+            return Conflict(Error("TRANSFER_CONFLICT", ex.GetBaseException().Message));
+        }
+        catch (Exception ex)
+        {
+            return StatusCode(500, Error("TRANSFER_UNEXPECTED_ERROR", ex.Message));
         }
     }
 
@@ -123,9 +137,21 @@ public class AccountsController : ControllerBase
         {
             return StatusCode(423, Error("IDEMPOTENCY_CONFLICT", ex.Message));
         }
+        catch (TransactionInProgressException ex)
+        {
+            return StatusCode(423, Error("IDEMPOTENCY_CONFLICT", ex.Message));
+        }
         catch (InvalidOperationException ex)
         {
             return BadRequest(Error("DEPOSIT_FAILED", ex.Message));
+        }
+        catch (DbUpdateException ex)
+        {
+            return Conflict(Error("DEPOSIT_CONFLICT", ex.GetBaseException().Message));
+        }
+        catch (Exception ex)
+        {
+            return StatusCode(500, Error("DEPOSIT_UNEXPECTED_ERROR", ex.Message));
         }
     }
 
@@ -142,9 +168,21 @@ public class AccountsController : ControllerBase
         {
             return StatusCode(423, Error("IDEMPOTENCY_CONFLICT", ex.Message));
         }
+        catch (TransactionInProgressException ex)
+        {
+            return StatusCode(423, Error("IDEMPOTENCY_CONFLICT", ex.Message));
+        }
         catch (InvalidOperationException ex)
         {
             return BadRequest(Error("WITHDRAW_FAILED", ex.Message));
+        }
+        catch (DbUpdateException ex)
+        {
+            return Conflict(Error("WITHDRAW_CONFLICT", ex.GetBaseException().Message));
+        }
+        catch (Exception ex)
+        {
+            return StatusCode(500, Error("WITHDRAW_UNEXPECTED_ERROR", ex.Message));
         }
     }
 

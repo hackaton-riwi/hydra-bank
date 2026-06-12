@@ -25,19 +25,24 @@ public class IdempotencyService : IIdempotencyService
     public async Task<IdempotencyResult?> GetAsync(
         Guid tenantId, Guid userId, string key)
     {
-        // Try Redis first for fast path
-        var response = await _redis.StringGetAsync(ResponseKey(tenantId, userId, key));
-
-        if (!response.IsNullOrEmpty)
+        try
         {
-            return new IdempotencyResult
+            var response = await _redis.StringGetAsync(ResponseKey(tenantId, userId, key));
+
+            if (!response.IsNullOrEmpty)
             {
-                StatusCode = 200,
-                ResponseBody = JsonSerializer.Deserialize<object>(response.ToString())!
-            };
+                return new IdempotencyResult
+                {
+                    StatusCode = 200,
+                    ResponseBody = JsonSerializer.Deserialize<object>(response.ToString())!
+                };
+            }
+        }
+        catch (RedisException)
+        {
+            // Redis is a cache/lock accelerator. PostgreSQL remains the source of truth.
         }
 
-        // Fallback to DB
         var record = await _db.IdempotencyRecords
             .AsNoTracking()
             .FirstOrDefaultAsync(r =>
@@ -48,8 +53,13 @@ public class IdempotencyService : IIdempotencyService
 
         if (record != null && record.ResponseBody != null)
         {
-            // Cache in Redis for next time
-            await _redis.StringSetAsync(ResponseKey(tenantId, userId, key), record.ResponseBody, _expiry);
+            try
+            {
+                await _redis.StringSetAsync(ResponseKey(tenantId, userId, key), record.ResponseBody, _expiry);
+            }
+            catch (RedisException)
+            {
+            }
 
             return new IdempotencyResult
             {
@@ -68,43 +78,58 @@ public class IdempotencyService : IIdempotencyService
     public async Task<bool> StartProcessingAsync(
         Guid tenantId, Guid userId, string key)
     {
-        // Check if already completed in Redis
-        if (await _redis.KeyExistsAsync(ResponseKey(tenantId, userId, key)))
-            return false;
+        var keyGuid = Guid.Parse(key);
+        var now = DateTime.UtcNow;
 
-        // Try atomic lock acquisition
-        var acquired = await _redis.StringSetAsync(
-            ProcessingKey(tenantId, userId, key), "PROCESSING", _expiry, When.NotExists);
+        var existing = await _db.IdempotencyRecords
+            .FirstOrDefaultAsync(r =>
+                r.TenantId == tenantId &&
+                r.UserId == userId &&
+                r.IdempotencyKey == keyGuid);
 
-        if (!acquired)
+        if (existing is not null)
         {
-            // Check DB for existing record (could be PROCESSING or COMPLETED)
-            var existing = await _db.IdempotencyRecords
-                .AsNoTracking()
-                .FirstOrDefaultAsync(r =>
-                    r.TenantId == tenantId &&
-                    r.UserId == userId &&
-                    r.IdempotencyKey == Guid.Parse(key));
+            if (existing.State == IdempotencyState.COMPLETED)
+                return false;
 
-            if (existing != null)
-            {
-                if (existing.State == IdempotencyState.COMPLETED)
-                    return false; // Already completed, GetAsync will handle replay
-                if (existing.State == IdempotencyState.PROCESSING)
-                    return false; // Still processing
-                if (existing.State == IdempotencyState.FAILED)
-                {
-                    // Allow retry for failed - delete and allow new attempt
-                    _db.IdempotencyRecords.Remove(existing);
-                    await _db.SaveChangesAsync();
-                    // Retry lock acquisition
-                    return await _redis.StringSetAsync(
-                        ProcessingKey(tenantId, userId, key), "PROCESSING", _expiry, When.NotExists);
-                }
-            }
+            if (existing.State == IdempotencyState.PROCESSING && existing.ExpiresAt > now)
+                return false;
+
+            _db.IdempotencyRecords.Remove(existing);
+            await _db.SaveChangesAsync();
         }
 
-        return acquired;
+        _db.IdempotencyRecords.Add(new IdempotencyRecord
+        {
+            Id = Guid.NewGuid(),
+            TenantId = tenantId,
+            UserId = userId,
+            IdempotencyKey = keyGuid,
+            RequestHash = ComputeRequestHash(tenantId, userId, key),
+            State = IdempotencyState.PROCESSING,
+            CreatedAt = now,
+            ExpiresAt = now.Add(_expiry)
+        });
+
+        try
+        {
+            await _db.SaveChangesAsync();
+        }
+        catch (DbUpdateException)
+        {
+            return false;
+        }
+
+        try
+        {
+            await _redis.StringSetAsync(
+                ProcessingKey(tenantId, userId, key), "PROCESSING", _expiry, When.NotExists);
+        }
+        catch (RedisException)
+        {
+        }
+
+        return true;
     }
 
     public async Task CompleteAsync(
@@ -152,9 +177,14 @@ public class IdempotencyService : IIdempotencyService
 
         await _db.SaveChangesAsync();
 
-        // Cache in Redis
-        await _redis.StringSetAsync(ResponseKey(tenantId, userId, key), serialized, _expiry);
-        await _redis.KeyDeleteAsync(ProcessingKey(tenantId, userId, key));
+        try
+        {
+            await _redis.StringSetAsync(ResponseKey(tenantId, userId, key), serialized, _expiry);
+            await _redis.KeyDeleteAsync(ProcessingKey(tenantId, userId, key));
+        }
+        catch (RedisException)
+        {
+        }
     }
 
     public async Task FailAsync(
@@ -180,8 +210,13 @@ public class IdempotencyService : IIdempotencyService
             await _db.SaveChangesAsync();
         }
 
-        // Clean up Redis
-        await _redis.KeyDeleteAsync(ProcessingKey(tenantId, userId, key));
+        try
+        {
+            await _redis.KeyDeleteAsync(ProcessingKey(tenantId, userId, key));
+        }
+        catch (RedisException)
+        {
+        }
     }
 
     private static string ProcessingKey(Guid tenantId, Guid userId, string key)
