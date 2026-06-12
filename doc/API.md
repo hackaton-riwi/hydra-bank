@@ -93,7 +93,6 @@ Registra un nuevo cliente dentro de un tenant. **No requiere autenticación.** T
     "AccountNumber": "3748291056",
     "ownerId": "USR-4A3F21BC",
     "Balance": 0.00,
-    "Currency": "COP",
     "Status": "ACTIVE",
     "CreatedAt": "2025-06-11T10:30:00Z"
   }
