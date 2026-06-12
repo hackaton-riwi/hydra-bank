@@ -176,6 +176,7 @@ builder.Services.AddHttpClient<IWebhookNotifier, WebhookNotifier>();
 
 var app = builder.Build();
 
+await ApplyDatabaseMigrationsAsync(app);
 await SeedIdentityRolesAsync(app);
 await SeedSuperAdminAsync(app);
 
@@ -205,6 +206,14 @@ app.UseAuthorization();
 app.MapControllers().RequireCors(CorsPolicyName);
 
 app.Run();
+
+static async Task ApplyDatabaseMigrationsAsync(WebApplication app)
+{
+    using var scope = app.Services.CreateScope();
+    var dbContext = scope.ServiceProvider.GetRequiredService<BankOsDbContext>();
+
+    await dbContext.Database.MigrateAsync();
+}
 
 static async Task SeedIdentityRolesAsync(WebApplication app)
 {
