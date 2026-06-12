@@ -87,13 +87,12 @@ public class AccountService : IAccountService
 
         return Success("ACCOUNT_CREATED", "Cuenta creada correctamente", new
         {
-            id = BuildShortId("ACC", account.Id),
+            account.Id,
             account.AccountNumber,
-            ownerId = BuildShortId("USR", account.OwnerId),
+            account.OwnerId,
             owner.FullName,
             owner.DocumentNumber,
             account.Balance,
-            account.Currency,
             Status = account.Status.ToString(),
             account.CreatedAt
         });
@@ -119,8 +118,11 @@ public class AccountService : IAccountService
             Action = "ACCOUNT_DEACTIVATED",
             OldValue = JsonSerializer.Serialize(new
             {
-                AccountId = account.Id,
-                Status = AccountStatus.ACTIVE.ToString()
+                SourceAccountId = account.Id,
+                SourceAccountShortId = BuildShortId("ACC", account.Id),
+                OwnerId = account.OwnerId,
+                OwnerShortId = BuildShortId("USR", account.OwnerId),
+                account.Balance
             }),
             NewValue = JsonSerializer.Serialize(new
             {
@@ -360,13 +362,12 @@ public class AccountService : IAccountService
     {
         return new
         {
-            id = BuildShortId("ACC", account.Id),
+            account.Id,
             account.AccountNumber,
-            ownerId = BuildShortId("USR", account.OwnerId),
+            account.OwnerId,
             account.User.FullName,
             account.User.DocumentNumber,
             account.Balance,
-            account.Currency,
             Status = account.Status.ToString(),
             account.CreatedAt,
             account.UpdatedAt,

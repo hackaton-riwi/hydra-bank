@@ -247,7 +247,6 @@ public class TenantsController : ControllerBase
                     id = BuildShortId("ACC", account.Id),
                     account.AccountNumber,
                     account.Balance,
-                    account.Currency,
                     Status = account.Status.ToString(),
                     account.CreatedAt
                 })
@@ -462,7 +461,6 @@ public class TenantsController : ControllerBase
                     id = BuildShortId("ACC", a.Id),
                     a.AccountNumber,
                     a.Balance,
-                    a.Currency,
                     Status = a.Status.ToString(),
                     a.CreatedAt
                 })
