@@ -93,33 +93,54 @@ public class AccountsController : ControllerBase
         return Ok(await _accountService.GetTransactionsAsync());
     }
 
+    private string? _GetCorrelationId()
+    {
+        return Request.Headers["X-Correlation-ID"].FirstOrDefault()
+            ?? _accountService.GetLastCorrelationId();
+    }
+
+    private void SetCorrelationIdHeader()
+    {
+        var correlationId = _GetCorrelationId();
+        if (!string.IsNullOrEmpty(correlationId))
+        {
+            Response.Headers["X-Correlation-ID"] = correlationId;
+        }
+    }
+
     [HttpPost("transfer")]
     public async Task<IActionResult> Transfer([FromBody] TransferRequestDto dto)
     {
         try
         {
+            SetCorrelationIdHeader();
             var result = await _accountService.TransferAsync(dto);
             Response.Headers["X-Correlation-ID"] = _accountService.GetLastCorrelationId();
             return Ok(result);
         }
         catch (InvalidOperationException ex) when (ex.Message.Contains("Idempotency"))
         {
+            SetCorrelationIdHeader();
             return StatusCode(423, Error("IDEMPOTENCY_CONFLICT", ex.Message));
         }
         catch (TransactionInProgressException ex)
         {
+            SetCorrelationIdHeader();
             return StatusCode(423, Error("IDEMPOTENCY_CONFLICT", ex.Message));
         }
         catch (InvalidOperationException ex)
         {
+            SetCorrelationIdHeader();
             return BadRequest(Error("TRANSFER_FAILED", ex.Message));
         }
         catch (DbUpdateException ex)
         {
+            SetCorrelationIdHeader();
             return Conflict(Error("TRANSFER_CONFLICT", ex.GetBaseException().Message));
         }
         catch (Exception ex)
         {
+            SetCorrelationIdHeader();
             return StatusCode(500, Error("TRANSFER_UNEXPECTED_ERROR", ex.Message));
         }
     }
@@ -129,28 +150,34 @@ public class AccountsController : ControllerBase
     {
         try
         {
+            SetCorrelationIdHeader();
             var result = await _accountService.DepositAsync(dto);
             Response.Headers["X-Correlation-ID"] = _accountService.GetLastCorrelationId();
             return Ok(result);
         }
         catch (InvalidOperationException ex) when (ex.Message.Contains("Idempotency"))
         {
+            SetCorrelationIdHeader();
             return StatusCode(423, Error("IDEMPOTENCY_CONFLICT", ex.Message));
         }
         catch (TransactionInProgressException ex)
         {
+            SetCorrelationIdHeader();
             return StatusCode(423, Error("IDEMPOTENCY_CONFLICT", ex.Message));
         }
         catch (InvalidOperationException ex)
         {
+            SetCorrelationIdHeader();
             return BadRequest(Error("DEPOSIT_FAILED", ex.Message));
         }
         catch (DbUpdateException ex)
         {
+            SetCorrelationIdHeader();
             return Conflict(Error("DEPOSIT_CONFLICT", ex.GetBaseException().Message));
         }
         catch (Exception ex)
         {
+            SetCorrelationIdHeader();
             return StatusCode(500, Error("DEPOSIT_UNEXPECTED_ERROR", ex.Message));
         }
     }
@@ -160,28 +187,34 @@ public class AccountsController : ControllerBase
     {
         try
         {
+            SetCorrelationIdHeader();
             var result = await _accountService.WithdrawAsync(dto);
             Response.Headers["X-Correlation-ID"] = _accountService.GetLastCorrelationId();
             return Ok(result);
         }
         catch (InvalidOperationException ex) when (ex.Message.Contains("Idempotency"))
         {
+            SetCorrelationIdHeader();
             return StatusCode(423, Error("IDEMPOTENCY_CONFLICT", ex.Message));
         }
         catch (TransactionInProgressException ex)
         {
+            SetCorrelationIdHeader();
             return StatusCode(423, Error("IDEMPOTENCY_CONFLICT", ex.Message));
         }
-        catch (DbUpdateException ex)
+        catch (DbUpdateException)
         {
+            SetCorrelationIdHeader();
             return BadRequest(new { success = false, code = "WITHDRAW_FAILED", description = "Saldo insuficiente" });
         }
         catch (InvalidOperationException ex)
         {
+            SetCorrelationIdHeader();
             return BadRequest(Error("WITHDRAW_FAILED", ex.Message));
         }
         catch (Exception ex)
         {
+            SetCorrelationIdHeader();
             return StatusCode(500, Error("WITHDRAW_UNEXPECTED_ERROR", ex.Message));
         }
     }

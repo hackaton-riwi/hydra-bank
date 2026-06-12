@@ -36,13 +36,32 @@ const string CorsPolicyName = "AllowAll";
 builder.Services.AddControllers();
 
 // 2. Un solo bloque de configuración de CORS
+var corsOrigins = builder.Configuration.GetSection("Cors:AllowedOrigins").Get<string[]>() ?? [];
+var isDevelopment = builder.Environment.IsDevelopment();
+
 builder.Services.AddCors(options =>
 {
     options.AddPolicy(CorsPolicyName, policy =>
-        policy
-            .AllowAnyOrigin()
-            .AllowAnyHeader()
-            .AllowAnyMethod());
+    {
+        if (corsOrigins.Length > 0)
+        {
+            policy.WithOrigins(corsOrigins)
+                  .AllowAnyHeader()
+                  .AllowAnyMethod();
+        }
+        else if (isDevelopment)
+        {
+            policy.AllowAnyOrigin()
+                  .AllowAnyHeader()
+                  .AllowAnyMethod();
+        }
+        else
+        {
+            policy.WithOrigins("https://hydrabank.bytecore.tech")
+                  .AllowAnyHeader()
+                  .AllowAnyMethod();
+        }
+    });
 });
 
 builder.Services.AddEndpointsApiExplorer();
@@ -195,7 +214,8 @@ app.UseMiddleware<Hydra.Api.Middleware.PathTenantSlugMiddleware>();
 
 app.UseCors(CorsPolicyName);
 
-// El Rate Limiter va antes de la Auth para mitigar ataques de fuerza bruta en el login de forma eficiente.
+app.UseMiddleware<Hydra.Api.Middleware.CorsPreflightMiddleware>();
+
 app.UseRateLimiter();
 
 app.UseAuthentication();
@@ -259,11 +279,14 @@ static async Task SeedIdentityRolesAsync(WebApplication app)
 
 static async Task SeedSuperAdminAsync(WebApplication app)
 {
+    var configuration = app.Services.GetRequiredService<IConfiguration>();
     const string tenantName = "Hydra Bank";
     const string tenantSlug = "hydra-bank";
     const string email = "admin@hydra.test";
-    const string password = "hydra123*";
     const string superAdminRole = "SUPERADMIN";
+
+    var superAdminPassword = configuration["SuperAdmin:Password"]
+        ?? throw new InvalidOperationException("SuperAdmin:Password no está configurado. Configurelo en appsettings o variable de entorno.");
 
     using var scope = app.Services.CreateScope();
     var dbContext = scope.ServiceProvider.GetRequiredService<BankOsDbContext>();
@@ -320,7 +343,7 @@ static async Task SeedSuperAdminAsync(WebApplication app)
         dbContext.BankUsers.Add(bankUser);
     }
 
-    bankUser.PasswordHash = bankPasswordHasher.HashPassword(bankUser, password);
+        bankUser.PasswordHash = bankPasswordHasher.HashPassword(bankUser, superAdminPassword);
     bankUser.UpdatedAt = now;
     await dbContext.SaveChangesAsync();
 
@@ -344,7 +367,7 @@ static async Task SeedSuperAdminAsync(WebApplication app)
                 $"No se pudo crear el superadmin: {string.Join(", ", createResult.Errors.Select(x => x.Description))}");
         }
 
-        identityUser.PasswordHash = userManager.PasswordHasher.HashPassword(identityUser, password);
+        identityUser.PasswordHash = userManager.PasswordHasher.HashPassword(identityUser, superAdminPassword);
         await userManager.UpdateAsync(identityUser);
         await userManager.UpdateSecurityStampAsync(identityUser);
     }
@@ -352,7 +375,7 @@ static async Task SeedSuperAdminAsync(WebApplication app)
     {
         identityUser.Email = email;
         identityUser.EmailConfirmed = true;
-        identityUser.PasswordHash = userManager.PasswordHasher.HashPassword(identityUser, password);
+        identityUser.PasswordHash = userManager.PasswordHasher.HashPassword(identityUser, superAdminPassword);
         await userManager.UpdateAsync(identityUser);
         await userManager.UpdateSecurityStampAsync(identityUser);
     }
