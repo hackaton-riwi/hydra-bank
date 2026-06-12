@@ -28,6 +28,10 @@ public class TenantsController : ControllerBase
     private const decimal DefaultMaxTransactionAmount = 5_000_000m;
     private const decimal DefaultFeeValue = 0m;
     private const string TenantAdminRole = "ADMIN";
+    private static readonly HashSet<string> ReservedSlugs = new(StringComparer.OrdinalIgnoreCase)
+    {
+        "auth", "accounts", "tenants", "health", "swagger"
+    };
 
     private readonly BankOsDbContext _dbContext;
     private readonly UserManager<IdentityUser> _userManager;
@@ -78,6 +82,14 @@ public class TenantsController : ControllerBase
     {
         var tenantName = request.NombreTenant.Trim();
         var slug = BuildSlug(tenantName);
+
+        if (ReservedSlugs.Contains(slug))
+        {
+            return BadRequest(new
+            {
+                message = $"El slug '{slug}' está reservado por el sistema"
+            });
+        }
 
         if (!SlugRegex.IsMatch(slug))
         {
@@ -291,6 +303,13 @@ public class TenantsController : ControllerBase
         });
     }
 
+    [HttpGet("~/api/v1/{tenantSlug}/users")]
+    [Authorize(Roles = "ADMIN,SUPERADMIN")]
+    public Task<IActionResult> GetUsersBySlug(string tenantSlug)
+    {
+        return GetUsers(tenantSlug);
+    }
+
     [HttpGet("{tenantKey}/transactions")]
     [Authorize(Roles = "ADMIN,SUPERADMIN")]
     public async Task<IActionResult> GetTransactionHistory(
@@ -396,6 +415,19 @@ public class TenantsController : ControllerBase
         });
     }
 
+    [HttpGet("~/api/v1/{tenantSlug}/transactions")]
+    [Authorize(Roles = "ADMIN,SUPERADMIN")]
+    public Task<IActionResult> GetTransactionHistoryBySlug(
+        string tenantSlug,
+        [FromQuery] DateTime? from,
+        [FromQuery] DateTime? to,
+        [FromQuery] TransactionType? type,
+        [FromQuery] int limit = 50,
+        [FromQuery] int offset = 0)
+    {
+        return GetTransactionHistory(tenantSlug, from, to, type, limit, offset);
+    }
+
     [HttpGet("{tenantKey}/audit-logs")]
     [Authorize(Roles = "ADMIN,SUPERADMIN")]
     public async Task<IActionResult> GetAuditLogs(
@@ -468,6 +500,16 @@ public class TenantsController : ControllerBase
             total,
             logs
         });
+    }
+
+    [HttpGet("~/api/v1/{tenantSlug}/audit-logs")]
+    [Authorize(Roles = "ADMIN,SUPERADMIN")]
+    public Task<IActionResult> GetAuditLogsBySlug(
+        string tenantSlug,
+        [FromQuery] int limit = 50,
+        [FromQuery] int offset = 0)
+    {
+        return GetAuditLogs(tenantSlug, limit, offset);
     }
 
     [HttpGet("current/users")]
@@ -735,6 +777,13 @@ public class TenantsController : ControllerBase
                 idempotencyRecords = idempotencyRecords.Count
             }
         });
+    }
+
+    [HttpDelete("~/api/v1/{tenantSlug}")]
+    [Authorize(Roles = "SUPERADMIN")]
+    public Task<IActionResult> DeleteBySlug(string tenantSlug)
+    {
+        return Delete(tenantSlug);
     }
 
     private static string BuildSlug(string tenantName)

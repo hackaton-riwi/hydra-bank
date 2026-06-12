@@ -40,7 +40,6 @@ public class IdempotencyService : IIdempotencyService
         }
         catch (RedisException)
         {
-            // Redis is a cache/lock accelerator. PostgreSQL remains the source of truth.
         }
 
         var record = await _db.IdempotencyRecords
@@ -70,16 +69,13 @@ public class IdempotencyService : IIdempotencyService
 
         return null;
     }
-    
-    
-    
-    
 
     public async Task<bool> StartProcessingAsync(
-        Guid tenantId, Guid userId, string key)
+        Guid tenantId, Guid userId, string key, string? requestBody)
     {
         var keyGuid = Guid.Parse(key);
         var now = DateTime.UtcNow;
+        var requestHash = ComputeRequestHash(tenantId, userId, key, requestBody);
 
         var existing = await _db.IdempotencyRecords
             .FirstOrDefaultAsync(r =>
@@ -93,7 +89,12 @@ public class IdempotencyService : IIdempotencyService
                 return false;
 
             if (existing.State == IdempotencyState.PROCESSING && existing.ExpiresAt > now)
+            {
+                if (existing.RequestHash != requestHash)
+                    throw new InvalidOperationException("Idempotency-Key reutilizada con payload diferente");
+
                 return false;
+            }
 
             _db.IdempotencyRecords.Remove(existing);
             await _db.SaveChangesAsync();
@@ -105,7 +106,7 @@ public class IdempotencyService : IIdempotencyService
             TenantId = tenantId,
             UserId = userId,
             IdempotencyKey = keyGuid,
-            RequestHash = ComputeRequestHash(tenantId, userId, key),
+            RequestHash = requestHash,
             State = IdempotencyState.PROCESSING,
             CreatedAt = now,
             ExpiresAt = now.Add(_expiry)
@@ -136,14 +137,13 @@ public class IdempotencyService : IIdempotencyService
         Guid tenantId, Guid userId, string key, object response)
     {
         var serialized = JsonSerializer.Serialize(response);
-        var requestHash = ComputeRequestHash(tenantId, userId, key);
+        var keyGuid = Guid.Parse(key);
 
-        // Persist to DB
         var record = await _db.IdempotencyRecords
             .FirstOrDefaultAsync(r =>
                 r.TenantId == tenantId &&
                 r.UserId == userId &&
-                r.IdempotencyKey == Guid.Parse(key));
+                r.IdempotencyKey == keyGuid);
 
         if (record == null)
         {
@@ -152,8 +152,8 @@ public class IdempotencyService : IIdempotencyService
                 Id = Guid.NewGuid(),
                 TenantId = tenantId,
                 UserId = userId,
-                IdempotencyKey = Guid.Parse(key),
-                RequestHash = requestHash,
+                IdempotencyKey = keyGuid,
+                RequestHash = ComputeRequestHash(tenantId, userId, key, null),
                 ResponseBody = serialized,
                 StatusCode = 200,
                 State = IdempotencyState.COMPLETED,
@@ -164,11 +164,6 @@ public class IdempotencyService : IIdempotencyService
         }
         else
         {
-            // Validate request hash hasn't changed
-            if (record.RequestHash != requestHash)
-            {
-                throw new InvalidOperationException("Idempotency key reused with different payload");
-            }
             record.ResponseBody = serialized;
             record.StatusCode = 200;
             record.State = IdempotencyState.COMPLETED;
@@ -190,9 +185,6 @@ public class IdempotencyService : IIdempotencyService
     public async Task FailAsync(
         Guid tenantId, Guid userId, string key)
     {
-        var requestHash = ComputeRequestHash(tenantId, userId, key);
-
-        // Update DB record
         var record = await _db.IdempotencyRecords
             .FirstOrDefaultAsync(r =>
                 r.TenantId == tenantId &&
@@ -201,10 +193,6 @@ public class IdempotencyService : IIdempotencyService
 
         if (record != null)
         {
-            if (record.RequestHash != requestHash)
-            {
-                throw new InvalidOperationException("Idempotency key reused with different payload");
-            }
             record.State = IdempotencyState.FAILED;
             record.ExpiresAt = DateTime.UtcNow.Add(TimeSpan.FromHours(1));
             await _db.SaveChangesAsync();
@@ -225,11 +213,12 @@ public class IdempotencyService : IIdempotencyService
     private static string ResponseKey(Guid tenantId, Guid userId, string key)
         => $"idempotency:{tenantId}:{userId}:{key}:response";
 
-    private static string ComputeRequestHash(Guid tenantId, Guid userId, string key)
+    private static string ComputeRequestHash(Guid tenantId, Guid userId, string key, string? requestBody)
     {
-        // In production, this should hash the actual request body
-        // For now, use a deterministic key-based hash
-        var input = $"{tenantId}:{userId}:{key}";
+        var input = string.IsNullOrWhiteSpace(requestBody)
+            ? $"{tenantId}:{userId}:{key}"
+            : $"{tenantId}:{userId}:{key}:{requestBody}";
+
         using var sha256 = SHA256.Create();
         var hash = sha256.ComputeHash(Encoding.UTF8.GetBytes(input));
         return Convert.ToHexString(hash);

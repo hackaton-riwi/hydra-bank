@@ -59,7 +59,7 @@ public class AuthController : ControllerBase
     public async Task<IActionResult> Register(RegisterTenantClientDto request)
     {
         var email = request.Email.Trim().ToLowerInvariant();
-        var tenantSlug = request.TenantSlug.Trim().ToLowerInvariant();
+        var tenantSlug = ResolveTenantSlug(request.TenantSlug);
         var documentNumber = NormalizeDocumentNumber(request.DocumentNumber);
 
         if (string.IsNullOrWhiteSpace(documentNumber))
@@ -177,7 +177,7 @@ public class AuthController : ControllerBase
     public async Task<IActionResult> Login(LoginDto request)
     {
         var email = request.Email.Trim().ToLowerInvariant();
-        var tenantSlug = request.TenantSlug.Trim().ToLowerInvariant();
+        var tenantSlug = ResolveTenantSlug(request.TenantSlug);
 
         var tenant = await _dbContext.Tenants
             .AsNoTracking()
@@ -454,6 +454,18 @@ public class AuthController : ControllerBase
         return await _dbContext.BankUsers
             .AsNoTracking()
             .SingleOrDefaultAsync(bankUser => bankUser.TenantId == tenantId && bankUser.Id == userId);
+    }
+
+    private string ResolveTenantSlug(string fromBody)
+    {
+        if (!string.IsNullOrWhiteSpace(fromBody))
+            return fromBody.Trim().ToLowerInvariant();
+
+        var fromPath = HttpContext?.Items["ResolvedTenantSlug"]?.ToString();
+        if (!string.IsNullOrWhiteSpace(fromPath))
+            return fromPath.Trim().ToLowerInvariant();
+
+        return string.Empty;
     }
 
     private static string NormalizeDocumentNumber(string documentNumber)

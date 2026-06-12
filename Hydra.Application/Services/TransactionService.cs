@@ -30,7 +30,8 @@ public class TransactionService : ITransactionService
         string idempotencyKey,
         string correlationId)
     {
-        var acquired = await _idempotency.StartProcessingAsync(tenantId, userId, idempotencyKey);
+        var requestBody = JsonSerializer.Serialize(request);
+        var acquired = await _idempotency.StartProcessingAsync(tenantId, userId, idempotencyKey, requestBody);
         if (!acquired)
         {
             var cached = await _idempotency.GetAsync(tenantId, userId, idempotencyKey);
@@ -97,6 +98,9 @@ public class TransactionService : ITransactionService
             var totalDebit = RoundMoney(request.Amount + fee);
 
             if (source.Balance < totalDebit)
+                throw new InvalidOperationException("Saldo insuficiente");
+
+            if (Math.Round(source.Balance - totalDebit, 2) < 0)
                 throw new InvalidOperationException("Saldo insuficiente");
 
             var now = DateTime.UtcNow;
@@ -214,7 +218,8 @@ public class TransactionService : ITransactionService
         string idempotencyKey,
         string correlationId)
     {
-        var acquired = await _idempotency.StartProcessingAsync(tenantId, userId, idempotencyKey);
+        var requestBody = JsonSerializer.Serialize(request);
+        var acquired = await _idempotency.StartProcessingAsync(tenantId, userId, idempotencyKey, requestBody);
         if (!acquired)
         {
             var cached = await _idempotency.GetAsync(tenantId, userId, idempotencyKey);
@@ -363,7 +368,8 @@ public class TransactionService : ITransactionService
         string idempotencyKey,
         string correlationId)
     {
-        var acquired = await _idempotency.StartProcessingAsync(tenantId, userId, idempotencyKey);
+        var requestBody = JsonSerializer.Serialize(request);
+        var acquired = await _idempotency.StartProcessingAsync(tenantId, userId, idempotencyKey, requestBody);
         if (!acquired)
         {
             var cached = await _idempotency.GetAsync(tenantId, userId, idempotencyKey);
@@ -406,6 +412,9 @@ public class TransactionService : ITransactionService
             var totalDebit = RoundMoney(request.Amount + fee);
 
             if (account.Balance < totalDebit)
+                throw new InvalidOperationException("Saldo insuficiente");
+
+            if (Math.Round(account.Balance - totalDebit, 2) < 0)
                 throw new InvalidOperationException("Saldo insuficiente");
 
             var now = DateTime.UtcNow;
