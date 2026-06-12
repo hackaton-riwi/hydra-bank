@@ -26,6 +26,7 @@ using Microsoft.AspNetCore.Http;
 using Microsoft.Extensions.Configuration;
 using Microsoft.Extensions.DependencyInjection;
 using Microsoft.Extensions.Hosting;
+using Microsoft.Extensions.Logging;
 
 var builder = WebApplication.CreateBuilder(args);
 
@@ -176,9 +177,7 @@ builder.Services.AddHttpClient<IWebhookNotifier, WebhookNotifier>();
 
 var app = builder.Build();
 
-await ApplyDatabaseMigrationsAsync(app);
-await SeedIdentityRolesAsync(app);
-await SeedSuperAdminAsync(app);
+await InitializeDatabaseAsync(app);
 
 var swaggerEnabled = app.Environment.IsDevelopment()
     || app.Configuration.GetValue<bool>("Swagger:Enabled");
@@ -206,6 +205,35 @@ app.UseAuthorization();
 app.MapControllers().RequireCors(CorsPolicyName);
 
 app.Run();
+
+static async Task InitializeDatabaseAsync(WebApplication app)
+{
+    var applyMigrations = app.Configuration.GetValue<bool?>("Database:ApplyMigrationsOnStartup")
+        ?? app.Environment.IsDevelopment();
+    var seedDatabase = app.Configuration.GetValue<bool?>("Database:SeedOnStartup")
+        ?? app.Environment.IsDevelopment();
+
+    if (applyMigrations)
+    {
+        app.Logger.LogInformation("Applying database migrations on startup.");
+        await ApplyDatabaseMigrationsAsync(app);
+    }
+    else
+    {
+        app.Logger.LogInformation("Skipping database migrations on startup.");
+    }
+
+    if (seedDatabase)
+    {
+        app.Logger.LogInformation("Seeding database on startup.");
+        await SeedIdentityRolesAsync(app);
+        await SeedSuperAdminAsync(app);
+    }
+    else
+    {
+        app.Logger.LogInformation("Skipping database seed on startup.");
+    }
+}
 
 static async Task ApplyDatabaseMigrationsAsync(WebApplication app)
 {
