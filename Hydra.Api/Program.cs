@@ -191,8 +191,8 @@ if (swaggerEnabled)
 app.UseHttpsRedirection();
 app.UseRouting();
 
-// 3. ORDEN DE MIDDLEWARES CORREGIDO:
-// CORS va de primero para responder las peticiones OPTIONS previas del navegador.
+app.UseMiddleware<Hydra.Api.Middleware.PathTenantSlugMiddleware>();
+
 app.UseCors(CorsPolicyName);
 
 // El Rate Limiter va antes de la Auth para mitigar ataques de fuerza bruta en el login de forma eficiente.

@@ -11,10 +11,11 @@
 1. [Conceptos clave](#conceptos-clave)
 2. [Autenticación — `/api/v1/auth`](#1-autenticación)
 3. [Tenants — `/api/v1/tenants`](#2-tenants)
-4. [Cuentas — `/api/v1/accounts`](#3-cuentas)
-5. [Transacciones financieras](#4-transacciones-financieras)
-6. [Códigos de error comunes](#5-códigos-de-error-comunes)
-7. [Headers especiales para operaciones financieras](#6-headers-especiales)
+4. [Routing path-based por tenant](#3-routing-path-based-por-tenant)
+5. [Cuentas — `/api/v1/accounts`](#4-cuentas)
+6. [Transacciones financieras](#5-transacciones-financieras)
+7. [Códigos de error comunes](#6-códigos-de-error-comunes)
+8. [Headers especiales para operaciones financieras](#7-headers-especiales)
 
 ---
 
@@ -93,7 +94,6 @@ Registra un nuevo cliente dentro de un tenant. **No requiere autenticación.** T
     "AccountNumber": "3748291056",
     "ownerId": "USR-4A3F21BC",
     "Balance": 0.00,
-    "Currency": "COP",
     "Status": "ACTIVE",
     "CreatedAt": "2025-06-11T10:30:00Z"
   }
@@ -457,7 +457,50 @@ Elimina un tenant completo con todos sus usuarios, cuentas, transacciones y regi
 
 ---
 
-## 3. Cuentas
+## 3. Routing path-based por tenant
+
+Todas las rutas de tenant admiten dos formatos equivalentes. El formato path-based usa el slug en la URL y es el recomendado para producción y demos.
+
+Todas las rutas de tenant admiten dos formatos equivalentes. El formato path-based usa el slug en la URL y es el recomendado para producción y demos.
+
+### Formato 1: path-based (recomendado)
+```
+/api/v1/{tenantSlug}/users
+/api/v1/{tenantSlug}/transactions
+/api/v1/{tenantSlug}/audit-logs
+/api/v1/{tenantSlug}                    (DELETE, solo SUPERADMIN)
+/api/v1/{tenantSlug}/auth/login
+/api/v1/{tenantSlug}/auth/register
+```
+
+### Formato 2: legacy con tenantKey
+```
+/api/v1/tenants/{tenantKey}/users
+/api/v1/tenants/{tenantKey}/transactions
+/api/v1/tenants/{tenantKey}/audit-logs
+/api/v1/tenants/{tenantKey}             (DELETE, solo SUPERADMIN)
+/api/v1/auth/login                      (con tenantSlug en body)
+/api/v1/auth/register                   (con tenantSlug en body)
+```
+
+> Ambos formatos devuelven exactamente la misma respuesta. El path-based elimina la necesidad de enviar `tenantSlug` en el body de login/register.
+
+### Slugs reservados
+Los siguientes slugs no pueden usarse porque colisionan con rutas del sistema:
+
+| Slug reservado | Motivo |
+|----------------|--------|
+| `auth` | Ruta de autenticación |
+| `accounts` | Ruta de cuentas |
+| `tenants` | Ruta de tenants |
+| `health` | Reservado para health checks |
+| `swagger` | Reservado para documentación |
+
+Si un slug generado automáticamente coincide con uno reservado, la API rechaza la creación del tenant.
+
+---
+
+## 4. Cuentas
 
 > Todos los endpoints de `/api/v1/accounts` requieren autenticación con rol `CLIENT`.
 

@@ -6,7 +6,7 @@ public interface IIdempotencyService
         Guid tenantId, Guid userId, string key);
 
     Task<bool> StartProcessingAsync(
-        Guid tenantId, Guid userId, string key);
+        Guid tenantId, Guid userId, string key, string? requestBody);
 
     Task CompleteAsync(
         Guid tenantId, Guid userId, string key, object response);

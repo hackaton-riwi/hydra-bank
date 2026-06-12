@@ -172,13 +172,13 @@ public class AccountsController : ControllerBase
         {
             return StatusCode(423, Error("IDEMPOTENCY_CONFLICT", ex.Message));
         }
+        catch (DbUpdateException ex)
+        {
+            return BadRequest(new { success = false, code = "WITHDRAW_FAILED", description = "Saldo insuficiente" });
+        }
         catch (InvalidOperationException ex)
         {
             return BadRequest(Error("WITHDRAW_FAILED", ex.Message));
-        }
-        catch (DbUpdateException ex)
-        {
-            return Conflict(Error("WITHDRAW_CONFLICT", ex.GetBaseException().Message));
         }
         catch (Exception ex)
         {
