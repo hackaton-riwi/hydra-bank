@@ -560,16 +560,7 @@ Recarga (añade saldo) a la cuenta propia del cliente autenticado. No genera com
 ---
 
 ### GET `/api/v1/accounts/transactions`
-Historial de transacciones del cliente autenticado.
-
-**Query params opcionales:**
-| Param | Tipo | Descripción |
-|-------|------|-------------|
-| `limit` | int (1–100) | Por defecto `20` |
-| `offset` | int | Por defecto `0` |
-| `from` | datetime | Fecha inicio (UTC). Ej: `2025-06-01T00:00:00Z` |
-| `to` | datetime | Fecha fin (UTC) |
-| `type` | string | `TRANSFER`, `DEPOSIT` o `WITHDRAW` |
+Historial de transacciones del cliente autenticado. No recibe query params; devuelve las transacciones propias mas recientes, con limite interno de 100 resultados.
 
 **Respuesta exitosa `200 OK`:**
 ```json
@@ -578,8 +569,7 @@ Historial de transacciones del cliente autenticado.
   "code": "TRANSACTION_HISTORY",
   "description": "Historial consultado correctamente",
   "data": {
-    "limit": 20,
-    "offset": 0,
+    "limit": 100,
     "total": 35,
     "items": [
       {

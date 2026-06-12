@@ -183,29 +183,18 @@ public class AccountService : IAccountService
         return Success("ACCOUNT_QUERIED", "Estado de la cuenta consultado correctamente", BuildAccount(account));
     }
 
-    public async Task<object> GetTransactionsAsync(TransactionHistoryQueryDto query)
+    public async Task<object> GetTransactionsAsync()
     {
         var (tenantId, userId) = GetCurrentTenantUser();
-        var limit = Math.Clamp(query.Limit, 1, 100);
-        var offset = Math.Max(query.Offset, 0);
+        const int limit = 100;
 
         var transactionsQuery = _dbContext.Transactions
             .AsNoTracking()
             .Where(x => x.TenantId == tenantId && x.UserId == userId);
 
-        if (query.From.HasValue)
-            transactionsQuery = transactionsQuery.Where(x => x.CreatedAt >= query.From.Value);
-
-        if (query.To.HasValue)
-            transactionsQuery = transactionsQuery.Where(x => x.CreatedAt <= query.To.Value);
-
-        if (query.Type.HasValue)
-            transactionsQuery = transactionsQuery.Where(x => x.Type == query.Type.Value);
-
         var total = await transactionsQuery.CountAsync();
         var items = await transactionsQuery
             .OrderByDescending(x => x.CreatedAt)
-            .Skip(offset)
             .Take(limit)
             .Select(x => new
             {
@@ -223,7 +212,6 @@ public class AccountService : IAccountService
         return Success("TRANSACTION_HISTORY", "Historial consultado correctamente", new
         {
             limit,
-            offset,
             total,
             items
         });
@@ -290,8 +278,22 @@ public class AccountService : IAccountService
     {
         var normalized = accountKey.Trim();
 
+        if (string.IsNullOrWhiteSpace(normalized))
+            throw new InvalidOperationException("La cuenta es obligatoria");
+
         if (Guid.TryParse(normalized, out var accountId))
             return accountId;
+
+        var accountByNumber = await _dbContext.Accounts
+            .AsNoTracking()
+            .Where(account =>
+                account.TenantId == tenantId &&
+                account.AccountNumber == normalized)
+            .Select(account => (Guid?)account.Id)
+            .SingleOrDefaultAsync();
+
+        if (accountByNumber.HasValue)
+            return accountByNumber.Value;
 
         var shortCode = normalized.ToUpperInvariant();
         const string prefix = "ACC-";
@@ -299,7 +301,7 @@ public class AccountService : IAccountService
             shortCode = shortCode[prefix.Length..];
 
         if (shortCode.Length < 8)
-            throw new InvalidOperationException("El id de cuenta debe ser un GUID o un codigo corto tipo ACC-1234ABCD");
+            throw new InvalidOperationException("La cuenta debe ser un numero de cuenta, GUID o codigo corto tipo ACC-1234ABCD");
 
         var accounts = await _dbContext.Accounts
             .AsNoTracking()
@@ -314,7 +316,7 @@ public class AccountService : IAccountService
         return matches.Count switch
         {
             1 => matches[0],
-            0 => throw new InvalidOperationException("Cuenta no encontrada con ese codigo corto"),
+            0 => throw new InvalidOperationException("Cuenta no encontrada"),
             _ => throw new InvalidOperationException("El codigo corto de cuenta es ambiguo; usa mas caracteres del GUID")
         };
     }

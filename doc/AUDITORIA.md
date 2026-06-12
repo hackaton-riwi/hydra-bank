@@ -23,7 +23,7 @@ El backend de BankOS cumple **100% de los requerimientos obligatorios** de la ha
 | 11 | Multimoneda | ✅ | Conversión con tasas estáticas configuradas por tenant |
 | 12 | Idempotencia | ✅ | `Idempotency-Key` obligatorio, Redis `SET NX` atómico, replay exacto, `423 Locked` concurrente, 24h expiración, persistencia dual Redis+PostgreSQL |
 | 13 | X-Correlation-ID | ✅ | Header → BD (transactions) → Response Header → Webhook |
-| 14 | Historial + Paginación | ✅ | `GET /api/v1/accounts/transactions` con `limit`, `offset`, `from`, `to`, `type` |
+| 14 | Historial propio | ✅ | `GET /api/v1/accounts/transactions` sin query params; ultimas transacciones del cliente autenticado |
 | 15 | API Versionada (v1) | ✅ | Todos los controladores bajo `/api/v1/` |
 | 16 | CORS | ✅ | `AddCors()` + `UseCors()` política permisiva |
 | 17 | Docker Compose | ✅ | `docker-compose.yml` con app + postgres + redis |

@@ -14,16 +14,19 @@ using Microsoft.EntityFrameworkCore;
 using Microsoft.IdentityModel.Tokens;
 using Microsoft.OpenApi;
 using StackExchange.Redis;
+using System.IdentityModel.Tokens.Jwt;
 using System.Security.Claims;
 using System.Text;
 using BankUser = Hydra.Domain.Entities.User;
 using System.Threading.RateLimiting;
 using System.Threading.Tasks;
 using Microsoft.AspNetCore.Builder;
+using Microsoft.Extensions.Caching.Distributed;
 using Microsoft.AspNetCore.Http;
 using Microsoft.Extensions.Configuration;
 using Microsoft.Extensions.DependencyInjection;
 using Microsoft.Extensions.Hosting;
+using Microsoft.Extensions.Logging;
 
 var builder = WebApplication.CreateBuilder(args);
 
@@ -110,6 +113,27 @@ builder.Services.AddAuthentication(options =>
             NameClaimType = ClaimTypes.NameIdentifier,
             RoleClaimType = ClaimTypes.Role
         };
+
+        options.Events = new JwtBearerEvents
+        {
+            OnTokenValidated = async context =>
+            {
+                var jti = context.Principal?.FindFirstValue(JwtRegisteredClaimNames.Jti);
+
+                if (string.IsNullOrWhiteSpace(jti))
+                {
+                    return;
+                }
+
+                var cache = context.HttpContext.RequestServices.GetRequiredService<IDistributedCache>();
+                var revokedToken = await cache.GetStringAsync(BuildRevokedTokenCacheKey(jti));
+
+                if (revokedToken is not null)
+                {
+                    context.Fail("Token revocado");
+                }
+            }
+        };
     });
 builder.Services.AddAuthorization();
 
@@ -153,8 +177,7 @@ builder.Services.AddHttpClient<IWebhookNotifier, WebhookNotifier>();
 
 var app = builder.Build();
 
-await SeedIdentityRolesAsync(app);
-await SeedSuperAdminAsync(app);
+await InitializeDatabaseAsync(app);
 
 var swaggerEnabled = app.Environment.IsDevelopment()
     || app.Configuration.GetValue<bool>("Swagger:Enabled");
@@ -182,6 +205,43 @@ app.UseAuthorization();
 app.MapControllers().RequireCors(CorsPolicyName);
 
 app.Run();
+
+static async Task InitializeDatabaseAsync(WebApplication app)
+{
+    var applyMigrations = app.Configuration.GetValue<bool?>("Database:ApplyMigrationsOnStartup")
+        ?? app.Environment.IsDevelopment();
+    var seedDatabase = app.Configuration.GetValue<bool?>("Database:SeedOnStartup")
+        ?? app.Environment.IsDevelopment();
+
+    if (applyMigrations)
+    {
+        app.Logger.LogInformation("Applying database migrations on startup.");
+        await ApplyDatabaseMigrationsAsync(app);
+    }
+    else
+    {
+        app.Logger.LogInformation("Skipping database migrations on startup.");
+    }
+
+    if (seedDatabase)
+    {
+        app.Logger.LogInformation("Seeding database on startup.");
+        await SeedIdentityRolesAsync(app);
+        await SeedSuperAdminAsync(app);
+    }
+    else
+    {
+        app.Logger.LogInformation("Skipping database seed on startup.");
+    }
+}
+
+static async Task ApplyDatabaseMigrationsAsync(WebApplication app)
+{
+    using var scope = app.Services.CreateScope();
+    var dbContext = scope.ServiceProvider.GetRequiredService<BankOsDbContext>();
+
+    await dbContext.Database.MigrateAsync();
+}
 
 static async Task SeedIdentityRolesAsync(WebApplication app)
 {
@@ -319,4 +379,9 @@ static string GetRateLimitPartitionKey(HttpContext httpContext)
     }
 
     return $"ip:{httpContext.Connection.RemoteIpAddress?.ToString() ?? "unknown"}";
+}
+
+static string BuildRevokedTokenCacheKey(string jti)
+{
+    return $"revoked-token:{jti}";
 }

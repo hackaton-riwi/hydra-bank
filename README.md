@@ -95,7 +95,7 @@ Rol:      SUPERADMIN
 | 1D | Multimoneda | ✅ Tasas estáticas por tenant |
 | 1E | Idempotencia | ✅ Redis SET NX + replay exacto |
 | 1E | X-Correlation-ID | ✅ Propagado header → BD → response |
-| 1F | Historial + Paginación | ✅ Limit/offset + filtros |
+| 1F | Historial propio | ✅ Ultimas transacciones del cliente autenticado |
 | 1G | API Versionada | ✅ /api/v1/... |
 | 2 | Docker Compose | ✅ app + postgres + redis |
 

@@ -23,6 +23,7 @@ public static class DependencyInjection
                 npgsqlOptions => npgsqlOptions
                     .MapEnum<AccountStatus>("account_status", nameTranslator: enumNameTranslator)
                     .MapEnum<FeeTypeEnum>("fee_type_enum", nameTranslator: enumNameTranslator)
+                    .MapEnum<IdempotencyState>("idempotency_state", nameTranslator: enumNameTranslator)
                     .MapEnum<TransactionStatus>("transaction_status", nameTranslator: enumNameTranslator)
                     .MapEnum<TransactionType>("transaction_type", nameTranslator: enumNameTranslator)
                     .MapEnum<UserRole>("user_role", nameTranslator: enumNameTranslator)));

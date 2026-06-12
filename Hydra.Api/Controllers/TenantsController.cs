@@ -229,41 +229,65 @@ public class TenantsController : ControllerBase
         if (!CanAccessTenant(tenant.Id))
             return Forbid();
 
-        var users = await _dbContext.BankUsers
+        var accountRows = await _dbContext.Accounts
             .AsNoTracking()
-            .Where(user => user.TenantId == tenant.Id)
-            .OrderBy(user => user.FullName)
-            .Select(user => new
+            .Where(account => account.TenantId == tenant.Id)
+            .OrderBy(account => account.CreatedAt)
+            .Select(account => new
             {
-                id = BuildShortId("USR", user.Id),
-                tenantId = BuildShortId("TEN", user.TenantId),
-                user.FullName,
-                user.DocumentNumber,
-                user.Email,
-                Role = user.Role.ToString(),
-                user.CreatedAt,
-                Accounts = user.Accounts.Select(account => new
+                account.OwnerId,
+                Account = new
                 {
                     id = BuildShortId("ACC", account.Id),
                     account.AccountNumber,
                     account.Balance,
                     Status = account.Status.ToString(),
                     account.CreatedAt
-                })
+                }
             })
             .ToListAsync();
 
-        var totalBalance = await _dbContext.Accounts
+        var accountsByOwner = accountRows
+            .GroupBy(account => account.OwnerId)
+            .ToDictionary(group => group.Key, group => group.Select(account => account.Account).ToList());
+
+        var users = await _dbContext.BankUsers
             .AsNoTracking()
-            .Where(account => account.TenantId == tenant.Id)
-            .SumAsync(account => account.Balance);
+            .Where(user => user.TenantId == tenant.Id)
+            .OrderBy(user => user.FullName)
+            .Select(user => new
+            {
+                user.Id,
+                id = BuildShortId("USR", user.Id),
+                tenantId = BuildShortId("TEN", user.TenantId),
+                user.FullName,
+                user.DocumentNumber,
+                user.Email,
+                Role = user.Role.ToString(),
+                user.CreatedAt
+            })
+            .ToListAsync();
+
+        var usersWithAccounts = users.Select(user => new
+        {
+            user.id,
+            user.tenantId,
+            user.FullName,
+            user.DocumentNumber,
+            user.Email,
+            user.Role,
+            user.CreatedAt,
+            Accounts = accountsByOwner.TryGetValue(user.Id, out var accounts) ? accounts : []
+        }).ToList();
+
+        var totalBalance = accountRows.Sum(account => account.Account.Balance);
 
         return Ok(new
         {
             tenant = BuildTenantSummary(tenant),
-            totalUsers = users.Count,
+            totalUsers = usersWithAccounts.Count,
             totalBalance,
-            users
+            users = usersWithAccounts
         });
     }
 
@@ -308,16 +332,47 @@ public class TenantsController : ControllerBase
             .Where(transaction => transaction.Status == TransactionStatus.SUCCESS)
             .SumAsync(transaction => transaction.FeeAmount ?? 0m);
 
-        var items = await query
+        var transactionRows = await query
             .OrderByDescending(transaction => transaction.CreatedAt)
             .Skip(offset)
             .Take(limit)
             .Select(transaction => new
             {
+                transaction.Id,
+                transaction.UserId,
+                transaction.Type,
+                transaction.OriginalAmount,
+                transaction.FeeAmount,
+                transaction.SourceAccountId,
+                transaction.DestinationAccountId,
+                transaction.Status,
+                transaction.CorrelationId,
+                transaction.CreatedAt
+            })
+            .ToListAsync();
+
+        var transactionUserIds = transactionRows.Select(transaction => transaction.UserId).Distinct().ToList();
+        var usersById = await _dbContext.BankUsers
+            .AsNoTracking()
+            .Where(user => user.TenantId == tenant.Id && transactionUserIds.Contains(user.Id))
+            .Select(user => new
+            {
+                user.Id,
+                user.FullName,
+                user.DocumentNumber
+            })
+            .ToDictionaryAsync(user => user.Id);
+
+        var items = transactionRows.Select(transaction =>
+        {
+            usersById.TryGetValue(transaction.UserId, out var transactionUser);
+
+            return new
+            {
                 id = BuildShortId("TRX", transaction.Id),
                 userId = BuildShortId("USR", transaction.UserId),
-                UserName = transaction.User.FullName,
-                UserDocument = transaction.User.DocumentNumber,
+                UserName = transactionUser?.FullName ?? "Usuario no encontrado",
+                UserDocument = transactionUser?.DocumentNumber,
                 Type = transaction.Type.ToString(),
                 transaction.OriginalAmount,
                 transaction.FeeAmount,
@@ -326,8 +381,8 @@ public class TenantsController : ControllerBase
                 Status = transaction.Status.ToString(),
                 transaction.CorrelationId,
                 transaction.CreatedAt
-            })
-            .ToListAsync();
+            };
+        }).ToList();
 
         return Ok(new
         {
@@ -363,21 +418,47 @@ public class TenantsController : ControllerBase
             .Where(log => log.TenantId == tenant.Id);
 
         var total = await query.CountAsync();
-        var logs = await query
+        var logRows = await query
             .OrderByDescending(log => log.CreatedAt)
             .Skip(offset)
             .Take(limit)
             .Select(log => new
             {
-                id = BuildShortId("LOG", log.Id),
-                userId = BuildShortId("USR", log.UserId),
-                UserName = log.User.FullName,
+                log.Id,
+                log.UserId,
                 log.Action,
                 log.OldValue,
                 log.NewValue,
                 log.CreatedAt
             })
             .ToListAsync();
+
+        var logUserIds = logRows.Select(log => log.UserId).Distinct().ToList();
+        var logUsersById = await _dbContext.BankUsers
+            .AsNoTracking()
+            .Where(user => user.TenantId == tenant.Id && logUserIds.Contains(user.Id))
+            .Select(user => new
+            {
+                user.Id,
+                user.FullName
+            })
+            .ToDictionaryAsync(user => user.Id);
+
+        var logs = logRows.Select(log =>
+        {
+            logUsersById.TryGetValue(log.UserId, out var logUser);
+
+            return new
+            {
+                id = BuildShortId("LOG", log.Id),
+                userId = BuildShortId("USR", log.UserId),
+                UserName = logUser?.FullName ?? "Usuario no encontrado",
+                log.Action,
+                log.OldValue,
+                log.NewValue,
+                log.CreatedAt
+            };
+        }).ToList();
 
         return Ok(new
         {
@@ -444,74 +525,147 @@ public class TenantsController : ControllerBase
         if (tenant is null)
             return NotFound(Error("TENANT_NOT_FOUND", "Tenant no encontrado"));
 
-        var users = await _dbContext.BankUsers
+        var accountRows = await _dbContext.Accounts
             .AsNoTracking()
-            .Where(u => u.TenantId == tenantId)
-            .OrderBy(u => u.FullName)
-            .Select(u => new
+            .Where(a => a.TenantId == tenantId)
+            .OrderBy(a => a.CreatedAt)
+            .Select(a => new
             {
-                id = BuildShortId("USR", u.Id),
-                u.FullName,
-                u.DocumentNumber,
-                u.Email,
-                Role = u.Role.ToString(),
-                u.CreatedAt,
-                Accounts = u.Accounts.Select(a => new
+                a.OwnerId,
+                Account = new
                 {
                     id = BuildShortId("ACC", a.Id),
                     a.AccountNumber,
                     a.Balance,
                     Status = a.Status.ToString(),
                     a.CreatedAt
-                })
+                },
+                a.Status,
+                a.Balance
             })
             .ToListAsync();
 
-        var accounts = await _dbContext.Accounts
+        var accountsByOwner = accountRows
+            .GroupBy(account => account.OwnerId)
+            .ToDictionary(group => group.Key, group => group.Select(account => account.Account).ToList());
+
+        var users = await _dbContext.BankUsers
             .AsNoTracking()
-            .Where(a => a.TenantId == tenantId)
+            .Where(u => u.TenantId == tenantId)
+            .OrderBy(u => u.FullName)
+            .Select(u => new
+            {
+                u.Id,
+                id = BuildShortId("USR", u.Id),
+                u.FullName,
+                u.DocumentNumber,
+                u.Email,
+                Role = u.Role.ToString(),
+                u.CreatedAt
+            })
             .ToListAsync();
 
-        var totalBalance = accounts.Sum(a => a.Balance);
+        var usersWithAccounts = users.Select(user => new
+        {
+            user.id,
+            user.FullName,
+            user.DocumentNumber,
+            user.Email,
+            user.Role,
+            user.CreatedAt,
+            Accounts = accountsByOwner.TryGetValue(user.Id, out var accounts) ? accounts : []
+        }).ToList();
 
-        var transactions = await _dbContext.Transactions
+        var transactionRows = await _dbContext.Transactions
             .AsNoTracking()
             .Where(t => t.TenantId == tenantId)
             .OrderByDescending(t => t.CreatedAt)
             .Take(20)
             .Select(t => new
             {
+                t.Id,
+                t.UserId,
+                t.Type,
+                t.OriginalAmount,
+                t.FeeAmount,
+                t.Status,
+                t.CreatedAt
+            })
+            .ToListAsync();
+
+        var dashboardTransactionUserIds = transactionRows.Select(t => t.UserId).Distinct().ToList();
+        var dashboardUsersById = await _dbContext.BankUsers
+            .AsNoTracking()
+            .Where(u => u.TenantId == tenantId && dashboardTransactionUserIds.Contains(u.Id))
+            .Select(u => new
+            {
+                u.Id,
+                u.FullName
+            })
+            .ToDictionaryAsync(u => u.Id);
+
+        var transactions = transactionRows.Select(t =>
+        {
+            dashboardUsersById.TryGetValue(t.UserId, out var transactionUser);
+
+            return new
+            {
                 id = BuildShortId("TRX", t.Id),
-                UserName = t.User.FullName,
+                UserName = transactionUser?.FullName ?? "Usuario no encontrado",
                 Type = t.Type.ToString(),
                 t.OriginalAmount,
                 t.FeeAmount,
                 Status = t.Status.ToString(),
                 t.CreatedAt
-            })
-            .ToListAsync();
+            };
+        }).ToList();
 
-        var auditLogs = await _dbContext.AuditLogs
+        var auditLogRows = await _dbContext.AuditLogs
             .AsNoTracking()
             .Where(l => l.TenantId == tenantId)
             .OrderByDescending(l => l.CreatedAt)
             .Take(20)
             .Select(l => new
             {
-                id = BuildShortId("LOG", l.Id),
-                UserName = l.User.FullName,
+                l.Id,
+                l.UserId,
                 l.Action,
                 l.CreatedAt
             })
             .ToListAsync();
 
+        var dashboardAuditUserIds = auditLogRows.Select(l => l.UserId).Distinct().ToList();
+        var dashboardAuditUsersById = await _dbContext.BankUsers
+            .AsNoTracking()
+            .Where(u => u.TenantId == tenantId && dashboardAuditUserIds.Contains(u.Id))
+            .Select(u => new
+            {
+                u.Id,
+                u.FullName
+            })
+            .ToDictionaryAsync(u => u.Id);
+
+        var auditLogs = auditLogRows.Select(l =>
+        {
+            dashboardAuditUsersById.TryGetValue(l.UserId, out var logUser);
+
+            return new
+            {
+                id = BuildShortId("LOG", l.Id),
+                UserName = logUser?.FullName ?? "Usuario no encontrado",
+                l.Action,
+                l.CreatedAt
+            };
+        }).ToList();
+
         return Ok(new
         {
             tenant = BuildTenantSummary(tenant),
-            totalUsers = users.Count,
-            totalAccounts = accounts.Count,
-            totalActiveAccounts = accounts.Count(a => a.Status.ToString() == "ACTIVE"),
-            totalBalance,
+            totalUsers = usersWithAccounts.Count,
+            totalAccounts = accountRows.Count,
+            totalActiveAccounts = accountRows.Count(a => a.Status == AccountStatus.ACTIVE),
+            totalBalance = accountRows.Sum(a => a.Balance),
+            users = usersWithAccounts,
             transactions,
             auditLogs
         });

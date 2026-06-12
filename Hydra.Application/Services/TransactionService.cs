@@ -200,9 +200,9 @@ public class TransactionService : ITransactionService
         catch
         {
             if (!committed)
-                await dbTransaction.RollbackAsync();
+                await RollbackIfPossibleAsync(dbTransaction);
 
-            await _idempotency.FailAsync(tenantId, userId, idempotencyKey);
+            await MarkIdempotencyFailedIfPossibleAsync(tenantId, userId, idempotencyKey);
             throw;
         }
     }
@@ -349,9 +349,9 @@ public class TransactionService : ITransactionService
         catch
         {
             if (!committed)
-                await dbTransaction.RollbackAsync();
+                await RollbackIfPossibleAsync(dbTransaction);
 
-            await _idempotency.FailAsync(tenantId, userId, idempotencyKey);
+            await MarkIdempotencyFailedIfPossibleAsync(tenantId, userId, idempotencyKey);
             throw;
         }
     }
@@ -499,9 +499,9 @@ public class TransactionService : ITransactionService
         catch
         {
             if (!committed)
-                await dbTransaction.RollbackAsync();
+                await RollbackIfPossibleAsync(dbTransaction);
 
-            await _idempotency.FailAsync(tenantId, userId, idempotencyKey);
+            await MarkIdempotencyFailedIfPossibleAsync(tenantId, userId, idempotencyKey);
             throw;
         }
     }
@@ -532,8 +532,22 @@ public class TransactionService : ITransactionService
     {
         var normalized = accountKey.Trim();
 
+        if (string.IsNullOrWhiteSpace(normalized))
+            throw new InvalidOperationException("La cuenta es obligatoria");
+
         if (Guid.TryParse(normalized, out var accountId))
             return accountId;
+
+        var accountByNumber = await _db.Accounts
+            .AsNoTracking()
+            .Where(account =>
+                account.TenantId == tenantId &&
+                account.AccountNumber == normalized)
+            .Select(account => (Guid?)account.Id)
+            .SingleOrDefaultAsync();
+
+        if (accountByNumber.HasValue)
+            return accountByNumber.Value;
 
         var shortCode = normalized.ToUpperInvariant();
         const string prefix = "ACC-";
@@ -541,7 +555,7 @@ public class TransactionService : ITransactionService
             shortCode = shortCode[prefix.Length..];
 
         if (shortCode.Length < 8)
-            throw new InvalidOperationException("El id de cuenta debe ser un GUID o un codigo corto tipo ACC-1234ABCD");
+            throw new InvalidOperationException("La cuenta debe ser un numero de cuenta, GUID o codigo corto tipo ACC-1234ABCD");
 
         var accounts = await _db.Accounts
             .AsNoTracking()
@@ -556,7 +570,7 @@ public class TransactionService : ITransactionService
         return matches.Count switch
         {
             1 => matches[0],
-            0 => throw new InvalidOperationException("Cuenta no encontrada con ese codigo corto"),
+            0 => throw new InvalidOperationException("Cuenta no encontrada"),
             _ => throw new InvalidOperationException("El codigo corto de cuenta es ambiguo; usa mas caracteres del GUID")
         };
     }
@@ -564,5 +578,27 @@ public class TransactionService : ITransactionService
     private static string BuildShortId(string prefix, Guid id)
     {
         return $"{prefix}-{id.ToString("N")[..8].ToUpperInvariant()}";
+    }
+
+    private static async Task RollbackIfPossibleAsync(Microsoft.EntityFrameworkCore.Storage.IDbContextTransaction dbTransaction)
+    {
+        try
+        {
+            await dbTransaction.RollbackAsync();
+        }
+        catch
+        {
+        }
+    }
+
+    private async Task MarkIdempotencyFailedIfPossibleAsync(Guid tenantId, Guid userId, string idempotencyKey)
+    {
+        try
+        {
+            await _idempotency.FailAsync(tenantId, userId, idempotencyKey);
+        }
+        catch
+        {
+        }
     }
 }
