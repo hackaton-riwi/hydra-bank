@@ -44,6 +44,7 @@ public class AccountsController : ControllerBase
 
     
     [HttpDelete("{accountKey}")]
+    [Authorize(Roles = ",ADMIN,SUPERADMIN")]
     public async Task<IActionResult> Deactivate(string accountKey)
     {
         try
