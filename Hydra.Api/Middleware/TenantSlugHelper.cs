@@ -1,3 +1,6 @@
+using System;
+using System.Collections.Generic;
+
 namespace Hydra.Api.Middleware;
 
 public static class TenantSlugHelper

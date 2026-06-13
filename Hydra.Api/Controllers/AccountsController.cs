@@ -1,4 +1,5 @@
 using System;
+using System.Linq;
 using System.Threading.Tasks;
 using Hydra.Application.DTOs;
 using Hydra.Application.Interfaces;
@@ -12,7 +13,6 @@ namespace Hydra.Api.Controllers;
 
 [ApiController]
 [Route("api/v1/accounts")]
-[Authorize(Roles = "CLIENT")]
 [EnableRateLimiting("financial")]
 public class AccountsController : ControllerBase
 {
@@ -24,6 +24,7 @@ public class AccountsController : ControllerBase
     }
 
     [HttpPost]
+    [Authorize(Roles = "CLIENT")]
     public async Task<IActionResult> Create([FromBody] CreateAccountDto request)
     {
         try
@@ -44,7 +45,7 @@ public class AccountsController : ControllerBase
 
     
     [HttpDelete("{accountKey}")]
-    [Authorize(Roles = ",ADMIN,SUPERADMIN")]
+    [Authorize(Roles = "ADMIN,SUPERADMIN")]
     public async Task<IActionResult> Deactivate(string accountKey)
     {
         try
@@ -59,6 +60,7 @@ public class AccountsController : ControllerBase
     
 
     [HttpPost("recharge")]
+    [Authorize(Roles = "CLIENT")]
     public async Task<IActionResult> Recharge([FromBody] RechargeAccountDto request)
     {
         try
@@ -72,6 +74,7 @@ public class AccountsController : ControllerBase
     }
 
     [HttpGet("me")]
+    [Authorize(Roles = "CLIENT")]
     public async Task<IActionResult> GetMyAccount()
     {
         try
@@ -89,6 +92,7 @@ public class AccountsController : ControllerBase
     }
 
     [HttpGet("transactions")]
+    [Authorize(Roles = "CLIENT")]
     public async Task<IActionResult> Transactions()
     {
         return Ok(await _accountService.GetTransactionsAsync());
@@ -110,6 +114,7 @@ public class AccountsController : ControllerBase
     }
 
     [HttpPost("transfer")]
+    [Authorize(Roles = "CLIENT")]
     public async Task<IActionResult> Transfer([FromBody] TransferRequestDto dto)
     {
         try
@@ -147,6 +152,7 @@ public class AccountsController : ControllerBase
     }
 
     [HttpPost("deposit")]
+    [Authorize(Roles = "CLIENT")]
     public async Task<IActionResult> Deposit([FromBody] DepositRequestDto dto)
     {
         try
@@ -184,6 +190,7 @@ public class AccountsController : ControllerBase
     }
 
     [HttpPost("withdraw")]
+    [Authorize(Roles = "CLIENT")]
     public async Task<IActionResult> Withdraw([FromBody] WithdrawRequestDto dto)
     {
         try

@@ -1,6 +1,8 @@
 using System.Text.RegularExpressions;
+using System.Threading.Tasks;
 using Hydra.Infrastructure.DATA;
 using Hydra.Api.Middleware;
+using Microsoft.AspNetCore.Http;
 using Microsoft.EntityFrameworkCore;
 
 namespace Hydra.Api.Middleware;
