@@ -1,5 +1,8 @@
+using System;
+using System.Linq;
 using System.Security.Claims;
 using System.Text.Json;
+using System.Threading.Tasks;
 using Hydra.Application.DTOs;
 using Hydra.Application.Interfaces;
 using Hydra.Domain.Entities;
@@ -17,6 +20,7 @@ public class AccountService : IAccountService
     private readonly BankOsDbContext _dbContext;
     private readonly IHttpContextAccessor _httpContextAccessor;
     private readonly ITransactionService _transactionService;
+    private string _lastCorrelationId = string.Empty;
 
     public AccountService(
         BankOsDbContext dbContext,
@@ -27,6 +31,8 @@ public class AccountService : IAccountService
         _httpContextAccessor = httpContextAccessor;
         _transactionService = transactionService;
     }
+
+    public string GetLastCorrelationId() => _lastCorrelationId;
 
     public async Task<object> CreateAsync(CreateAccountDto request)
     {
@@ -102,7 +108,9 @@ public class AccountService : IAccountService
     {
         var (tenantId, userId) = GetCurrentTenantUser();
         var accountId = await ResolveAccountIdAsync(tenantId, accountKey);
-        var account = await GetOwnAccountAsync(tenantId, userId, accountId);
+        
+        // CORRECCIÓN: Se usa el método administrativo para que no falle si lo ejecuta un ADMIN/SUPERADMIN
+        var account = await GetAccountForAdminAsync(tenantId, accountId);
 
         if (account.Status != AccountStatus.ACTIVE)
             return Success("ACCOUNT_ALREADY_INACTIVE", "La cuenta ya no se encuentra activa", BuildAccount(account));
@@ -110,11 +118,12 @@ public class AccountService : IAccountService
         account.Status = AccountStatus.INACTIVE;
         account.DeactivatedAt = DateTime.UtcNow;
         account.UpdatedAt = DateTime.UtcNow;
+        
         _dbContext.AuditLogs.Add(new AuditLog
         {
             Id = Guid.NewGuid(),
             TenantId = tenantId,
-            UserId = userId,
+            UserId = userId, // Guarda el ID del administrador que realizó la baja
             Action = "ACCOUNT_DEACTIVATED",
             OldValue = JsonSerializer.Serialize(new
             {
@@ -244,10 +253,6 @@ public class AccountService : IAccountService
         return result;
     }
 
-    private string _lastCorrelationId = string.Empty;
-
-    public string GetLastCorrelationId() => _lastCorrelationId;
-
     private (string idempotencyKey, string correlationId) GetRequestHeaders()
     {
         var context = _httpContextAccessor.HttpContext;
@@ -264,14 +269,6 @@ public class AccountService : IAccountService
             throw new InvalidOperationException("Header X-Correlation-ID debe ser un UUID");
 
         return (idempotencyKey, correlationId);
-    }
-
-    private async Task<Account> GetOwnAccountAsync(Guid tenantId, Guid userId, Guid accountId)
-    {
-        return await _dbContext.Accounts
-            .Include(x => x.User)
-            .SingleOrDefaultAsync(x => x.TenantId == tenantId && x.Id == accountId && x.OwnerId == userId)
-            ?? throw new InvalidOperationException("Cuenta no encontrada para el cliente autenticado");
     }
 
     private async Task<Guid> ResolveAccountIdAsync(Guid tenantId, string accountKey)
@@ -303,15 +300,14 @@ public class AccountService : IAccountService
         if (shortCode.Length < 8)
             throw new InvalidOperationException("La cuenta debe ser un numero de cuenta, GUID o codigo corto tipo ACC-1234ABCD");
 
-        var accounts = await _dbContext.Accounts
+        // OPTIMIZACIÓN: Buscamos las coincidencias convirtiendo el GUID en la base de datos de manera segura 
+        // en lugar de descargar miles de IDs a la memoria del servidor.
+        var matches = await _dbContext.Accounts
             .AsNoTracking()
             .Where(account => account.TenantId == tenantId)
+            .Where(account => EF.Functions.Like(account.Id.ToString(), $"{shortCode}%"))
             .Select(account => account.Id)
             .ToListAsync();
-
-        var matches = accounts
-            .Where(id => id.ToString("N").StartsWith(shortCode, StringComparison.OrdinalIgnoreCase))
-            .ToList();
 
         return matches.Count switch
         {
@@ -321,12 +317,29 @@ public class AccountService : IAccountService
         };
     }
 
+    private async Task<Account> GetOwnAccountAsync(Guid tenantId, Guid userId, Guid accountId)
+    {
+        return await _dbContext.Accounts
+            .Include(x => x.User)
+            .SingleOrDefaultAsync(x => x.TenantId == tenantId && x.Id == accountId && x.OwnerId == userId)
+            ?? throw new InvalidOperationException("Cuenta no encontrada para el cliente autenticado");
+    }
+
     private async Task<Account> GetOwnAccountAsync(Guid tenantId, Guid userId)
     {
         return await _dbContext.Accounts
             .Include(x => x.User)
             .SingleOrDefaultAsync(x => x.TenantId == tenantId && x.OwnerId == userId)
             ?? throw new InvalidOperationException("El cliente autenticado todavía no tiene cuenta");
+    }
+
+    // NUEVO MÉTODO EXCLUSIVO PARA ROLES ADMINISTRATIVOS
+    private async Task<Account> GetAccountForAdminAsync(Guid tenantId, Guid accountId)
+    {
+        return await _dbContext.Accounts
+            .Include(x => x.User)
+            .SingleOrDefaultAsync(x => x.TenantId == tenantId && x.Id == accountId)
+            ?? throw new InvalidOperationException("La cuenta solicitada no existe en este tenant.");
     }
 
     private (Guid TenantId, Guid UserId) GetCurrentTenantUser()
@@ -367,8 +380,8 @@ public class AccountService : IAccountService
             account.Id,
             account.AccountNumber,
             account.OwnerId,
-            account.User.FullName,
-            account.User.DocumentNumber,
+            FullName = account.User?.FullName,
+            DocumentNumber = account.User?.DocumentNumber,
             account.Balance,
             Status = account.Status.ToString(),
             account.CreatedAt,
@@ -392,5 +405,4 @@ public class AccountService : IAccountService
     {
         return $"{prefix}-{id.ToString("N")[..8].ToUpperInvariant()}";
     }
-
 }
