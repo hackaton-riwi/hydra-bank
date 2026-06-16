@@ -271,51 +271,57 @@ public class AccountService : IAccountService
         return (idempotencyKey, correlationId);
     }
 
-    private async Task<Guid> ResolveAccountIdAsync(Guid tenantId, string accountKey)
+   private async Task<Guid> ResolveAccountIdAsync(Guid tenantId, string accountKey)
+{
+    var normalized = accountKey.Trim();
+
+    if (string.IsNullOrWhiteSpace(normalized))
+        throw new InvalidOperationException("La cuenta es obligatoria");
+
+    // 1. Si es un GUID completo directo (Postgres lo lee perfecto)
+    if (Guid.TryParse(normalized, out var accountId))
+        return accountId;
+
+    // 2. Si es el Número de Cuenta exacto
+    var accountByNumber = await _dbContext.Accounts
+        .AsNoTracking()
+        .Where(account =>
+            account.TenantId == tenantId &&
+            account.AccountNumber == normalized)
+        .Select(account => (Guid?)account.Id)
+        .SingleOrDefaultAsync();
+
+    if (accountByNumber.HasValue)
+        return accountByNumber.Value;
+
+    // 3. Si es un código corto (Ej: ACC-1234ABCD)
+    var shortCode = normalized.ToUpperInvariant();
+    const string prefix = "ACC-";
+    if (shortCode.StartsWith(prefix, StringComparison.Ordinal))
+        shortCode = shortCode[prefix.Length..];
+
+    if (shortCode.Length < 8)
+        throw new InvalidOperationException("La cuenta debe ser un número de cuenta, GUID o código corto tipo ACC-1234ABCD");
+
+    // Traemos solo los IDs del Tenant actual (Búsqueda indexada ultra rápida en Postgres)
+    var tenantAccountIds = await _dbContext.Accounts
+        .AsNoTracking()
+        .Where(account => account.TenantId == tenantId)
+        .Select(account => account.Id)
+        .ToListAsync();
+
+    // Evaluamos el código corto en memoria (C#) para evitar el problema de conversión UUID -> String en Postgres
+    var matches = tenantAccountIds
+        .Where(id => id.ToString("N").StartsWith(shortCode, StringComparison.OrdinalIgnoreCase))
+        .ToList();
+
+    return matches.Count switch
     {
-        var normalized = accountKey.Trim();
-
-        if (string.IsNullOrWhiteSpace(normalized))
-            throw new InvalidOperationException("La cuenta es obligatoria");
-
-        if (Guid.TryParse(normalized, out var accountId))
-            return accountId;
-
-        var accountByNumber = await _dbContext.Accounts
-            .AsNoTracking()
-            .Where(account =>
-                account.TenantId == tenantId &&
-                account.AccountNumber == normalized)
-            .Select(account => (Guid?)account.Id)
-            .SingleOrDefaultAsync();
-
-        if (accountByNumber.HasValue)
-            return accountByNumber.Value;
-
-        var shortCode = normalized.ToUpperInvariant();
-        const string prefix = "ACC-";
-        if (shortCode.StartsWith(prefix, StringComparison.Ordinal))
-            shortCode = shortCode[prefix.Length..];
-
-        if (shortCode.Length < 8)
-            throw new InvalidOperationException("La cuenta debe ser un numero de cuenta, GUID o codigo corto tipo ACC-1234ABCD");
-
-        // OPTIMIZACIÓN: Buscamos las coincidencias convirtiendo el GUID en la base de datos de manera segura 
-        // en lugar de descargar miles de IDs a la memoria del servidor.
-        var matches = await _dbContext.Accounts
-            .AsNoTracking()
-            .Where(account => account.TenantId == tenantId)
-            .Where(account => EF.Functions.Like(account.Id.ToString(), $"{shortCode}%"))
-            .Select(account => account.Id)
-            .ToListAsync();
-
-        return matches.Count switch
-        {
-            1 => matches[0],
-            0 => throw new InvalidOperationException("Cuenta no encontrada"),
-            _ => throw new InvalidOperationException("El codigo corto de cuenta es ambiguo; usa mas caracteres del GUID")
-        };
-    }
+        1 => matches[0],
+        0 => throw new InvalidOperationException($"Cuenta no encontrada con la clave: {accountKey}"),
+        _ => throw new InvalidOperationException("El código corto de cuenta es ambiguo; usa más caracteres del GUID")
+    };
+}
 
     private async Task<Account> GetOwnAccountAsync(Guid tenantId, Guid userId, Guid accountId)
     {
