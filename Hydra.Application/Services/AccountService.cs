@@ -104,15 +104,14 @@ public class AccountService : IAccountService
         });
     }
 
+    // ─── DESACTIVAR CUENTA (BORRADO LÓGICO) ───
     public async Task<object> DeactivateAsync(string accountKey)
     {
         var (tenantId, userId) = GetCurrentTenantUser();
         var accountId = await ResolveAccountIdAsync(tenantId, accountKey);
-        
-        // CORRECCIÓN: Se usa el método administrativo para que no falle si lo ejecuta un ADMIN/SUPERADMIN
         var account = await GetAccountForAdminAsync(tenantId, accountId);
 
-        if (account.Status != AccountStatus.ACTIVE)
+        if (account.Status == AccountStatus.INACTIVE)
             return Success("ACCOUNT_ALREADY_INACTIVE", "La cuenta ya no se encuentra activa", BuildAccount(account));
 
         account.Status = AccountStatus.INACTIVE;
@@ -123,14 +122,13 @@ public class AccountService : IAccountService
         {
             Id = Guid.NewGuid(),
             TenantId = tenantId,
-            UserId = userId, // Guarda el ID del administrador que realizó la baja
+            UserId = userId, 
             Action = "ACCOUNT_DEACTIVATED",
             OldValue = JsonSerializer.Serialize(new
             {
                 SourceAccountId = account.Id,
                 SourceAccountShortId = BuildShortId("ACC", account.Id),
                 OwnerId = account.OwnerId,
-                OwnerShortId = BuildShortId("USR", account.OwnerId),
                 account.Balance
             }),
             NewValue = JsonSerializer.Serialize(new
@@ -145,6 +143,44 @@ public class AccountService : IAccountService
         await _dbContext.SaveChangesAsync();
 
         return Success("ACCOUNT_DEACTIVATED", "Cuenta desactivada correctamente", BuildAccount(account));
+    }
+
+    // ─── NUEVO MÉTODO: ACTIVAR / REACTIVAR CUENTA ───
+    public async Task<object> ActivateAsync(string accountKey)
+    {
+        var (tenantId, userId) = GetCurrentTenantUser();
+        var accountId = await ResolveAccountIdAsync(tenantId, accountKey);
+        var account = await GetAccountForAdminAsync(tenantId, accountId);
+
+        if (account.Status == AccountStatus.ACTIVE)
+            return Success("ACCOUNT_ALREADY_ACTIVE", "La cuenta ya se encuentra activa", BuildAccount(account));
+
+        account.Status = AccountStatus.ACTIVE;
+        account.DeactivatedAt = null; // Removemos la fecha de baja lógica
+        account.UpdatedAt = DateTime.UtcNow;
+        
+        _dbContext.AuditLogs.Add(new AuditLog
+        {
+            Id = Guid.NewGuid(),
+            TenantId = tenantId,
+            UserId = userId, 
+            Action = "ACCOUNT_REACTIVATED",
+            OldValue = JsonSerializer.Serialize(new
+            {
+                SourceAccountId = account.Id,
+                Status = AccountStatus.INACTIVE.ToString()
+            }),
+            NewValue = JsonSerializer.Serialize(new
+            {
+                AccountId = account.Id,
+                Status = account.Status.ToString()
+            }),
+            CreatedAt = account.UpdatedAt
+        });
+
+        await _dbContext.SaveChangesAsync();
+
+        return Success("ACCOUNT_ACTIVATED", "Cuenta reactivada correctamente", BuildAccount(account));
     }
 
     public async Task<object> RechargeAsync(RechargeAccountDto request)
@@ -185,10 +221,16 @@ public class AccountService : IAccountService
         return Success("ACCOUNT_RECHARGED", "Cuenta recargada correctamente", BuildAccount(account));
     }
 
+    // ─── CONTROL EN LA VISTA DEL CLIENTE ───
     public async Task<object> GetMyAccountAsync()
     {
         var (tenantId, userId) = GetCurrentTenantUser();
         var account = await GetOwnAccountAsync(tenantId, userId);
+        
+        // Si el cliente consulta su cuenta pero está INACTIVE, para su aplicación "no existe"
+        if (account.Status == AccountStatus.INACTIVE)
+            throw new InvalidOperationException("El cliente autenticado todavía no tiene cuenta activa");
+
         return Success("ACCOUNT_QUERIED", "Estado de la cuenta consultado correctamente", BuildAccount(account));
     }
 
@@ -271,57 +313,53 @@ public class AccountService : IAccountService
         return (idempotencyKey, correlationId);
     }
 
-   private async Task<Guid> ResolveAccountIdAsync(Guid tenantId, string accountKey)
-{
-    var normalized = accountKey.Trim();
-
-    if (string.IsNullOrWhiteSpace(normalized))
-        throw new InvalidOperationException("La cuenta es obligatoria");
-
-    // 1. Si es un GUID completo directo (Postgres lo lee perfecto)
-    if (Guid.TryParse(normalized, out var accountId))
-        return accountId;
-
-    // 2. Si es el Número de Cuenta exacto
-    var accountByNumber = await _dbContext.Accounts
-        .AsNoTracking()
-        .Where(account =>
-            account.TenantId == tenantId &&
-            account.AccountNumber == normalized)
-        .Select(account => (Guid?)account.Id)
-        .SingleOrDefaultAsync();
-
-    if (accountByNumber.HasValue)
-        return accountByNumber.Value;
-
-    // 3. Si es un código corto (Ej: ACC-1234ABCD)
-    var shortCode = normalized.ToUpperInvariant();
-    const string prefix = "ACC-";
-    if (shortCode.StartsWith(prefix, StringComparison.Ordinal))
-        shortCode = shortCode[prefix.Length..];
-
-    if (shortCode.Length < 8)
-        throw new InvalidOperationException("La cuenta debe ser un número de cuenta, GUID o código corto tipo ACC-1234ABCD");
-
-    // Traemos solo los IDs del Tenant actual (Búsqueda indexada ultra rápida en Postgres)
-    var tenantAccountIds = await _dbContext.Accounts
-        .AsNoTracking()
-        .Where(account => account.TenantId == tenantId)
-        .Select(account => account.Id)
-        .ToListAsync();
-
-    // Evaluamos el código corto en memoria (C#) para evitar el problema de conversión UUID -> String en Postgres
-    var matches = tenantAccountIds
-        .Where(id => id.ToString("N").StartsWith(shortCode, StringComparison.OrdinalIgnoreCase))
-        .ToList();
-
-    return matches.Count switch
+    private async Task<Guid> ResolveAccountIdAsync(Guid tenantId, string accountKey)
     {
-        1 => matches[0],
-        0 => throw new InvalidOperationException($"Cuenta no encontrada con la clave: {accountKey}"),
-        _ => throw new InvalidOperationException("El código corto de cuenta es ambiguo; usa más caracteres del GUID")
-    };
-}
+        var normalized = accountKey.Trim();
+
+        if (string.IsNullOrWhiteSpace(normalized))
+            throw new InvalidOperationException("La cuenta es obligatoria");
+
+        if (Guid.TryParse(normalized, out var accountId))
+            return accountId;
+
+        var accountByNumber = await _dbContext.Accounts
+            .AsNoTracking()
+            .Where(account =>
+                account.TenantId == tenantId &&
+                account.AccountNumber == normalized)
+            .Select(account => (Guid?)account.Id)
+            .SingleOrDefaultAsync();
+
+        if (accountByNumber.HasValue)
+            return accountByNumber.Value;
+
+        var shortCode = normalized.ToUpperInvariant();
+        const string prefix = "ACC-";
+        if (shortCode.StartsWith(prefix, StringComparison.Ordinal))
+            shortCode = shortCode[prefix.Length..];
+
+        if (shortCode.Length < 8)
+            throw new InvalidOperationException("La cuenta debe ser un número de cuenta, GUID o código corto tipo ACC-1234ABCD");
+
+        // Buscador compatible y seguro para PostgreSQL
+        var tenantAccountIds = await _dbContext.Accounts
+            .AsNoTracking()
+            .Where(account => account.TenantId == tenantId)
+            .Select(account => account.Id)
+            .ToListAsync();
+
+        var matches = tenantAccountIds
+            .Where(id => id.ToString("N").StartsWith(shortCode, StringComparison.OrdinalIgnoreCase))
+            .ToList();
+
+        return matches.Count switch
+        {
+            1 => matches[0],
+            0 => throw new InvalidOperationException($"Cuenta no encontrada con la clave: {accountKey}"),
+            _ => throw new InvalidOperationException("El código corto de cuenta es ambiguo; usa más caracteres del GUID")
+        };
+    }
 
     private async Task<Account> GetOwnAccountAsync(Guid tenantId, Guid userId, Guid accountId)
     {
@@ -339,7 +377,6 @@ public class AccountService : IAccountService
             ?? throw new InvalidOperationException("El cliente autenticado todavía no tiene cuenta");
     }
 
-    // NUEVO MÉTODO EXCLUSIVO PARA ROLES ADMINISTRATIVOS
     private async Task<Account> GetAccountForAdminAsync(Guid tenantId, Guid accountId)
     {
         return await _dbContext.Accounts

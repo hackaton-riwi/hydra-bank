@@ -4,6 +4,8 @@ namespace Hydra.Application.Interfaces;
 
 public interface IAccountService
 {
+    Task<object> ActivateAsync(string accountKey);
+    
     Task<object> CreateAsync(CreateAccountDto request);
 
     Task<object> DeactivateAsync(string accountKey);
